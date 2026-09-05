@@ -23,7 +23,7 @@ const WALLET_KEY_FILES = [
   path.join(BLOCKRUN_DIR, '.session'),            // EVM private key (0x hex)
   path.join(BLOCKRUN_DIR, '.solana-session'),     // Solana secret key (base58)
   path.join(BLOCKRUN_DIR, '.solana-session-key2'),
-  path.join(BLOCKRUN_DIR, 'solana-wallet.json'),  // legacy { address, private_key }
+  path.join(BLOCKRUN_DIR, 'solana-wallet.json'),  // legacy { address, privateKey }
   // Account bearer key (brk_...). Not a private key, but it spends: it draws
   // on a prepaid balance with no per-call signature and no chain-level
   // ceiling, so `cat ~/.blockrun/api-key` is exfiltration in one Read. It

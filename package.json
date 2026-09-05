@@ -38,7 +38,7 @@
     "desktop:package:win": "npm run dist:win --workspace @blockrun/franklin-desktop",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
-    "test": "npm run build && node --test --test-concurrency=4 --test-reporter=spec test/local.mjs test/api-key.local.mjs test/serve-security.local.mjs test/skills.local.mjs test/repair.mjs test/model-resolver.mjs test/exa.local.mjs test/audit-batch.local.mjs test/polymarket.local.mjs test/market.local.mjs test/hooks.local.mjs test/scheduler.local.mjs test/trade-plan.local.mjs test/goal.local.mjs test/memory.local.mjs test/agent-host.local.mjs test/reservation.local.mjs",
+    "test": "npm run build && node --test --test-concurrency=4 --test-reporter=spec test/local.mjs test/api-key.local.mjs test/solana-migration.local.mjs test/serve-security.local.mjs test/skills.local.mjs test/repair.mjs test/model-resolver.mjs test/exa.local.mjs test/audit-batch.local.mjs test/polymarket.local.mjs test/market.local.mjs test/hooks.local.mjs test/scheduler.local.mjs test/trade-plan.local.mjs test/goal.local.mjs test/memory.local.mjs test/agent-host.local.mjs test/reservation.local.mjs",
     "test:e2e": "npm run build && node --test --test-reporter=spec test/e2e.mjs",
     "e2e:polymarket:readonly": "npm run build && node scripts/polymarket-e2e-readonly.mjs",
     "test:free-models": "npm run build && node --test --test-reporter=spec test/free-model-matrix.mjs",
