@@ -42,6 +42,30 @@ wallet" while account credits sat there. They read the credit balance now, and
 an ungated account or an unreachable gateway means no local ceiling rather than
 an invented one.
 
+**`franklin usage` reconciles against the account ledger, row by row.** Key-mode
+totals in `franklin stats` are catalog estimates — the gateway settles without
+returning a charge, so Franklin books what a call SHOULD have cost. `GET
+/v1/usage` reports what it DID cost, and every response already carries an
+`x-blockrun-request-id` that Franklin now records, so the two are joined per
+request instead of compared as totals. A total that matches can still be two
+errors cancelling out.
+
+The feed has four properties that turn a careless read into a confident wrong
+answer, and the command respects all four: a `pending` row is usage whose charge
+does not exist yet and can still be repriced, so it is never summed as a settled
+zero (an unrecognised state is treated as pending, not priced); zero-cost rows
+are included on purpose, because "you were not charged" is an answer and an
+absent row is indistinguishable from a dropped one; `unavailable_days` names
+days the gateway could not list, and is reported as a short read rather than a
+quiet period; and `kind` says whether a row is checkable locally at all, since a
+`service` charge is a per-call figure only the gateway holds — a local estimate
+for one is a guess by construction, and the output says so rather than letting
+it read as a defect.
+
+It also names what it could NOT check: charged requests with no local row are
+real spend that never reached `--max-spend`, and local rows carrying no request
+id are reported rather than counted as agreeing.
+
 **The agent was told the account host was an alias of the Base gateway.** It is
 not. `api.blockrun.ai` authenticates a bearer key and 401s without one; the
 wallet hosts answer a 402 challenge and ignore a key entirely. Calling them

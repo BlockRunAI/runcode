@@ -78,6 +78,12 @@ export interface UsageRecord {
   costUsd: number;
   latencyMs: number;
   fallback?: boolean; // true if this request used fallback
+  /**
+   * The gateway's `x-blockrun-request-id` for this call, when it sent one.
+   * The join key `franklin usage` uses to line this row up against the
+   * account ledger. Absent on wallet-mode and free-path calls.
+   */
+  requestId?: string;
 }
 
 export interface ModelStats {
@@ -249,7 +255,9 @@ export function recordUsage(
    * key-mode row is priced locally. Surfaced by `franklin stats` so the ledger
    * never claims more precision than it has.
    */
-  estimated: boolean = isKeyMode()
+  estimated: boolean = isKeyMode(),
+  /** Gateway request id, from `requestIdFromResponse`. Enables reconciliation. */
+  requestId?: string | null
 ): void {
   // Count real spend BEFORE the test/audit gates — the --max-spend ceiling must
   // see every paid tool call even when history persistence is suppressed.
@@ -312,6 +320,9 @@ export function recordUsage(
     costUsd,
     latencyMs,
     fallback,
+    // Omit rather than store undefined: history is JSON round-tripped, and an
+    // explicit `requestId: undefined` survives as a key with no value.
+    ...(requestId ? { requestId } : {}),
   });
 
   scheduleSave();

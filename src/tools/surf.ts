@@ -28,7 +28,7 @@ import {
 } from '@blockrun/llm';
 import type { CapabilityHandler, CapabilityResult, ExecutionScope } from '../agent/types.js';
 import { loadChain, USER_AGENT} from '../config.js';
-import { basePriceForPath, chargeFromResponse, resolveCharge } from '../payments/price-catalog.js';
+import { basePriceForPath, chargeFromResponse, requestIdFromResponse, resolveCharge } from '../payments/price-catalog.js';
 import { GATEWAY_TRANSACTION_FEE_USD } from '../gateway-models.js';
 import { gatewayBase, gatewayHeaders } from '../payments/auth-mode.js';
 import { frameUntrusted } from './untrusted.js';
@@ -254,7 +254,7 @@ async function callSurf(
     const charge = response.ok
       ? resolveCharge({ apiPath: url, chargedUsd: chargeFromResponse(response), settledUsd: paidUsd })
       : { usd: 0, estimated: false };
-    try { recordUsage(`${toolName}:${entry.path}`, 0, 0, charge.usd, Date.now() - start, false, charge.estimated); } catch { /* best-effort */ }
+    try { recordUsage(`${toolName}:${entry.path}`, 0, 0, charge.usd, Date.now() - start, false, charge.estimated, requestIdFromResponse(response)); } catch { /* best-effort */ }
 
     if (!response.ok) {
       return {

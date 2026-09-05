@@ -48,7 +48,7 @@ import {
 } from '@blockrun/llm';
 import type { CapabilityHandler, CapabilityResult, ExecutionScope } from '../agent/types.js';
 import { loadChain, VERSION} from '../config.js';
-import { chargeFromResponse, resolveCharge } from '../payments/price-catalog.js';
+import { chargeFromResponse, requestIdFromResponse, resolveCharge } from '../payments/price-catalog.js';
 import { gatewayBase, gatewayHeaders } from '../payments/auth-mode.js';
 import { logger } from '../logger.js';
 import { recordFetch } from '../trading/providers/telemetry.js';
@@ -151,7 +151,7 @@ async function getWithPayment<T>(path: string, query: Record<string, string | nu
     // ALSO persist to franklin-stats (recordFetch is in-memory only, lost on
     // restart). Without this, Predexon spend is absent from `franklin stats`
     // and invisible to the --max-spend ceiling (parity with surf.ts).
-    try { recordUsage(`PredictionMarket:${path}`, 0, 0, charge.usd, Date.now() - startedAt, false, charge.estimated); } catch { /* best-effort */ }
+    try { recordUsage(`PredictionMarket:${path}`, 0, 0, charge.usd, Date.now() - startedAt, false, charge.estimated, requestIdFromResponse(response)); } catch { /* best-effort */ }
     return (await response.json()) as T;
   } finally {
     clearTimeout(timeout);

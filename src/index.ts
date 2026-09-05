@@ -302,6 +302,16 @@ program
   });
 
 program
+  .command('usage')
+  .description('Account ledger from the gateway, reconciled against the local journal')
+  .option('--days <n>', 'Days to read (default 30, max 365)')
+  .option('--json', 'Machine-readable output')
+  .action(async (opts) => {
+    const { usageCommand } = await import('./commands/usage.js');
+    await usageCommand(opts);
+  });
+
+program
   .command('wallet-adopt <address>')
   .description('Make a discovered Solana wallet the active one (backs up the current session)')
   .action(async (address: string) => {
