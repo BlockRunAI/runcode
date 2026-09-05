@@ -11,7 +11,7 @@ import { getWalletAddress as getBaseWalletAddress } from '@blockrun/llm';
 import { Keypair } from '@solana/web3.js';
 import bs58 from 'bs58';
 import { loadLearnings, decayLearnings, saveLearnings, formatForPrompt } from '../learnings/store.js';
-import { isKeyMode } from '../payments/auth-mode.js';
+import { isKeyMode, resolvePayMode } from '../payments/auth-mode.js';
 
 // ─── System Instructions Assembly ──────────────────────────────────────────
 // Composable prompt sections — each independently maintainable and conditionally includable.
@@ -263,22 +263,40 @@ Hard rules:
 }
 
 function getBlockRunApiSection(): string {
+  // Which host answers depends on how this session pays, and the three are not
+  // interchangeable: api.blockrun.ai authenticates a bearer key and 401s
+  // without one, while blockrun.ai / sol.blockrun.ai answer a 402 challenge and
+  // ignore a bearer key entirely. This section used to call api.blockrun.ai an
+  // "alias" of the Base gateway, which invited the model to send a wallet-signed
+  // request to a host that cannot settle it, or a key to a host that cannot read
+  // it. Name the one host this session actually uses.
+  //
+  // assembleInstructions() keys its cache on the pay mode, so this is safe to
+  // vary and cannot be served stale after a switch.
+  const mode = resolvePayMode();
+  const chargedBy = mode.kind === 'key' ? 'account credits' : 'x402 wallet payment';
+  const hosts = mode.kind === 'key'
+    ? `- **Your host: \`https://api.blockrun.ai\`** — the account API. Requests carry your configured key; the built-in tools attach it. It is a SEPARATE service, not an alias of the Base gateway.
+- Not yours: \`https://blockrun.ai/api\` (Base x402 wallet) and \`https://sol.blockrun.ai/api\` (Solana x402 wallet). They ignore an account key and answer 402. Never send one there, and never attach a wallet payment proof to an account request.`
+    : `- **Your host: \`${mode.apiBase}\`** — the ${mode.chain === 'solana' ? 'Solana' : 'Base'} x402 wallet gateway. Paid calls answer 402 and the tools sign from your ${mode.chain === 'solana' ? 'Solana' : 'Base'} wallet.
+- Not yours: \`${mode.chain === 'solana' ? 'https://blockrun.ai/api' : 'https://sol.blockrun.ai/api'}\` (the other chain's wallet gateway) and \`https://api.blockrun.ai\` (the account API, which needs a key and 401s without one — it is not an alias of either wallet host).`;
+
   return `# BlockRun Gateway API (the network you live on)
 You run on the BlockRun AI Gateway. When the user asks you to "test the BlockRun API", "check all endpoints", or call the gateway directly, use ONLY the paths below. **Never invent, pluralize, or singularize an endpoint** — \`/v1/image/generate\` (singular) is wrong, \`/v1/images/generations\` (plural) is correct. If a path you have in mind isn't in this list, fetch the canonical discovery endpoints before calling it.
 
 **Base URLs**
-- Base chain: \`https://blockrun.ai/api\` (alias: \`https://api.blockrun.ai\`)
-- Solana chain: \`https://sol.blockrun.ai/api\`
+${hosts}
+Use the built-in tools so the right host and credential are applied. Never switch billing modes to work around an API error.
 
 **Discovery (always free, GET) — fetch these BEFORE guessing a path**
 - \`GET /openapi.json\` (or \`/.well-known/openapi.json\`) — full OpenAPI 3.1 contract, every route + request schema
 - \`GET /.well-known/x402\` — x402 resource list with prices
 
-**LLM (POST, x402-paid)**
+**LLM (POST, billed to ${chargedBy})**
 - \`POST /v1/chat/completions\` — OpenAI-compatible. Body: \`{ model, messages, stream?, tools?, max_tokens?, temperature? }\`. \`model\` MUST come from \`GET /v1/models\` (real frontier examples on the gateway, verified live 2026-08-30: \`anthropic/claude-sonnet-5\`, \`anthropic/claude-opus-5\`, \`openai/gpt-5.6-sol\`, \`deepseek/deepseek-v4-pro\`, \`zai/glm-5.3\`, \`zai/glm-5.3-flash\`, \`xai/grok-4.5\`, \`qwen/qwen3.7-flash\`, \`nvidia/nemotron-3-nano-omni-30b-a3b-reasoning\` (free, the only free id on BOTH the Base and Solana gateways — the other free models are Base-only)). Do NOT invent versions like \`openai/gpt-5.1\` or \`xai/grok-5\` — those don't exist; the gateway 400s with the valid list in the error body, so when in doubt fetch \`GET /v1/models\` first.
 - \`POST /v1/messages\` — Anthropic-compatible. Body: \`{ model, messages, max_tokens, system?, tools? }\`.
 
-**Media (POST, x402-paid; GET to poll async jobs)**
+**Media (POST, billed to ${chargedBy}; GET to poll async jobs)**
 - \`POST /v1/images/generations\` — text-to-image. Body: \`{ model, prompt, size?, n?, response_format? }\`.
 - \`POST /v1/images/image2image\` — image-to-image. Body: \`{ model, prompt, image, ... }\`.
 - \`GET  /v1/images/generations/{id}\` — fetch a generated image by id.
@@ -286,7 +304,7 @@ You run on the BlockRun AI Gateway. When the user asks you to "test the BlockRun
 - \`GET  /v1/videos/generations/{id}\` — poll video job (settles payment when complete).
 - \`POST /v1/audio/generations\` — music/audio. Body: \`{ model, prompt, ... }\`. Default \`model\`: \`minimax/music-2.5+\`.
 
-**Search (POST, x402-paid)**
+**Search (POST, billed to ${chargedBy})**
 - \`POST /v1/search\` — Exa-backed web search. Body: \`{ query }\` (1–1000 chars).
 - \`/v1/exa/{...path}\` — Exa passthrough (answer / search / contents).
 
@@ -496,8 +514,13 @@ export function assembleInstructions(workingDir: string, model?: string): string
   // a session from key mode to wallet mode mid-process after a 401, and
   // without this the model would keep being told it bills account credits
   // long after Franklin went back to signing from the wallet.
-  const mode = isKeyMode() ? 'key' : 'wallet';
-  const cacheKey = model ? `${workingDir}::${model}::${mode}` : `${workingDir}::${mode}`;
+  // Keyed on the full billing identity, not just key-vs-wallet: the gateway
+  // host and the wallet guidance both name the active CHAIN, so a
+  // base -> solana switch inside one process must not be served the previous
+  // chain's instructions. resolvePayMode() is memoised, so this is cheap.
+  const payMode = resolvePayMode();
+  const billing = payMode.kind === 'key' ? 'key' : `wallet:${payMode.chain}`;
+  const cacheKey = model ? `${workingDir}::${model}::${billing}` : `${workingDir}::${billing}`;
   const cached = _instructionCache.get(cacheKey);
   if (cached) return cached;
 

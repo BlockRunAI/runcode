@@ -749,6 +749,63 @@ test('no paid tool states a payment rail unconditionally', async () => {
     `use the billing-copy helpers (or mode-neutral wording in static spec text):\n${offenders.join('\n')}`);
 });
 
+// ── Gateway host routing ──────────────────────────────────────────────────
+// api.blockrun.ai authenticates a bearer key and 401s without one; the wallet
+// hosts answer a 402 challenge and ignore a key. Telling the model they are
+// aliases invites a request the receiving host cannot settle.
+
+test('the system prompt names the one gateway host this session uses', async () => {
+  const { assembleInstructions } = await import('../dist/agent/context.js');
+  const section = () => {
+    auth.resetPayModeCache();
+    const all = assembleInstructions(TEST_HOME).join('\n');
+    const i = all.indexOf('**Base URLs**');
+    assert.ok(i > 0, 'Base URLs section must exist');
+    return all.slice(i, all.indexOf('**Discovery', i));
+  };
+
+  clean();
+  process.env.RUNCODE_CHAIN = 'solana';
+  let s = section();
+  assert.match(s, /Your host: `https:\/\/sol\.blockrun\.ai\/api`/);
+  assert.doesNotMatch(s, /Your host: `https:\/\/blockrun\.ai/);
+
+  // Same process, different chain: the instruction cache must not serve the
+  // previous chain's host.
+  process.env.RUNCODE_CHAIN = 'base';
+  s = section();
+  assert.match(s, /Your host: `https:\/\/blockrun\.ai\/api`/,
+    'a chain switch must re-render the host, not hit a stale cache entry');
+
+  process.env.BLOCKRUN_API_KEY = VALID_KEY;
+  s = section();
+  assert.match(s, /Your host: `https:\/\/api\.blockrun\.ai`/);
+  assert.match(s, /not an alias of the Base gateway/,
+    'the account host must never be described as a wallet-gateway alias');
+
+  delete process.env.RUNCODE_CHAIN;
+  clean();
+  auth.resetPayModeCache();
+});
+
+test('no mode is told the account host is an alias of a wallet host', async () => {
+  const { assembleInstructions } = await import('../dist/agent/context.js');
+  for (const setup of [
+    () => { clean(); process.env.RUNCODE_CHAIN = 'solana'; },
+    () => { clean(); process.env.RUNCODE_CHAIN = 'base'; },
+    () => { clean(); process.env.BLOCKRUN_API_KEY = VALID_KEY; },
+  ]) {
+    setup();
+    auth.resetPayModeCache();
+    const all = assembleInstructions(TEST_HOME).join('\n');
+    assert.doesNotMatch(all, /alias: `https:\/\/api\.blockrun\.ai`/,
+      'api.blockrun.ai is a separate account service, not an alias');
+  }
+  delete process.env.RUNCODE_CHAIN;
+  clean();
+  auth.resetPayModeCache();
+});
+
 test('cleanup', () => {
   clean();
   rmSync(TEST_HOME, { recursive: true, force: true });
