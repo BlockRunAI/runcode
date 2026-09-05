@@ -7,7 +7,7 @@ reviewed Franklin runtime and the matching UI.
 ## Current beta
 
 - Franklin chat with streaming tool activity and inline permission requests
-- local Base and Solana wallets with in-app network switching
+- local Base and Solana wallets with in-app network switching, or prepaid account billing via a BlockRun API key
 - model catalog, skills, MCP, media generation, wallet activity, and market tools
 - Agent Studio for discovering and importing supported local agent runtimes
 - personal and Team conversation spaces

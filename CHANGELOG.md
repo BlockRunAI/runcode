@@ -1,5 +1,53 @@
 # Changelog
 
+## Franklin Agent 3.46.0 — the account key could be read out of the agent, and key mode kept talking about a wallet
+
+**The account key was one auto-approved command away from your transcript.**
+Key mode puts a bearer credential in the environment, and the Bash tool handed
+the whole environment to every subprocess. `printenv` and `echo` are classified
+safe, so `printenv BLOCKRUN_API_KEY` needed no confirmation and returned the key
+as tool output — into the model prompt, over the network to whichever gateway
+model served the turn, and into the saved session. `cat ~/.blockrun/api-key`
+reached the same place through Read, because only the wallet key files were
+guarded.
+
+The redactor already knew the `brk_` shape. It never saw this: its one call site
+scrubs what *you* type, not what a tool returns. The key is not a private key,
+but it spends — a prepaid balance, no per-call signature, no chain-level ceiling
+— so it now gets the containment the wallet keys always had. It is withheld from
+the Bash subprocess, the key file is guarded like `.session`, and every tool
+result is scrubbed at the one funnel they all pass through, before the
+persist-to-disk branch so an oversized result is not written out in the clear.
+
+**An account error is no longer permission to spend from your wallet.** A 401 or
+a 404 used to replay the request against the wallet gateway, and a 401 switched
+the rest of the process to wallet billing. That silently changes who pays.
+Account errors now surface as themselves; `--wallet` is how you choose the other
+rail. An invalid, empty or unreadable key stops with an actionable error instead
+of quietly picking a different payment method.
+
+**Franklin stopped claiming USDC moved when it did not.** Six paid tools had no
+idea key mode existed and stated the wrong instrument in 38 places —
+`_$0.005 paid via x402._` on a call that signed nothing, `$5 USDC charged`
+against a wallet that never moved. The worst were the image, video and phone
+approval prompts, which asked you to approve a spend in a currency your session
+does not use. Receipts and prompts now name the rail that actually paid, and
+key-mode receipts state no dollar amount at all: the local figure is an estimate
+and your account ledger is authoritative, so they point at Activity instead of
+inventing precision.
+
+**Modal was unusable on an account.** The sandbox tools gated on an on-chain
+balance, so an unfunded wallet read $0 and every call failed with "fund the
+wallet" while account credits sat there. They read the credit balance now, and
+an ungated account or an unreachable gateway means no local ceiling rather than
+an invented one.
+
+**The system prompt no longer promises a wallet that isn't there.** Key-mode
+sessions were briefed on a chain, an address and a USDC balance, and pointed at
+a Wallet tool that returns a portal link. The instruction cache is keyed on the
+pay mode too, so a session that switches rails mid-run cannot be served the
+stale briefing.
+
 ## Franklin Agent 3.45.0 — the gateway now says what it charged, and the price the agent read was wrong
 
 **Paid calls are booked exactly instead of estimated.** The BlockRun gateway
