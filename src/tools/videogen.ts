@@ -41,6 +41,7 @@ import { resolveReferenceImage } from './imagegen.js';
 import { isWalletKeyPath } from './sensitive-paths.js';
 import { recordUsage } from '../stats/tracker.js';
 import { findModel, estimateCostUsd, GATEWAY_MARGIN, type GatewayModel } from '../gateway-models.js';
+import { noChargeNote, cancelHint } from '../payments/billing-copy.js';
 
 interface VideoGenInput {
   prompt: string;
@@ -181,11 +182,11 @@ function buildExecute(deps: VideoGenDeps) {
       // the prompt (flat per-second fallback only when the model is unknown).
       const est = resolveVideoUnitCost(videoCatalogModel, duration);
       const answer = await ctx.onAskUser(
-        `Generate a ${duration}s video with ${videoModel} for ~$${est.toFixed(2)}? No USDC is spent if you cancel.`,
+        `Generate a ${duration}s video with ${videoModel} for ~$${est.toFixed(2)}? ${cancelHint()}`,
         ['Generate', 'Cancel'],
       );
       if (answer !== 'Generate') {
-        return { output: `## Video generation cancelled\n\nNo USDC was spent.` };
+        return { output: `## Video generation cancelled\n\n${noChargeNote()}` };
       }
     }
 
@@ -194,7 +195,7 @@ function buildExecute(deps: VideoGenDeps) {
     if (contentId && deps.library) {
       const content = deps.library.get(contentId);
       if (!content) {
-        return { output: `Content ${contentId} not found. No USDC was spent.` };
+        return { output: `Content ${contentId} not found. ${noChargeNote()}` };
       }
       if (content.spentUsd + estCost > content.budgetUsd + 1e-9) {
         return {
@@ -202,7 +203,7 @@ function buildExecute(deps: VideoGenDeps) {
             `## Video generation skipped\n` +
             `- Would exceed budget: spent $${content.spentUsd.toFixed(2)} + estimated ` +
             `$${estCost.toFixed(2)} > cap $${content.budgetUsd.toFixed(2)}\n\n` +
-            `No USDC was spent.`,
+            noChargeNote(),
         };
       }
     }
@@ -588,7 +589,7 @@ export function createVideoGenCapability(deps: VideoGenDeps = {}): CapabilityHan
       name: 'VideoGen',
       description:
         "Generate a short MP4 video from a text prompt (optional seed image). " +
-        "Calls BlockRun's /v1/videos/generations. Costs USDC — default model " +
+        "Calls BlockRun's /v1/videos/generations. Billed per generation — default model " +
         "xai/grok-imagine-video bills $0.05/s (8s default ≈ $0.42). Generation " +
         "takes ~20–60s. ALWAYS confirm with the user before calling — videos " +
         "are expensive and slow. Pass contentId to attach to a Content piece " +

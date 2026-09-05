@@ -54,6 +54,7 @@ import { logger } from '../logger.js';
 import { recordFetch } from '../trading/providers/telemetry.js';
 import { recordUsage } from '../stats/tracker.js';
 import { frameUntrusted } from './untrusted.js';
+import { receiptLine } from '../payments/billing-copy.js';
 
 const TIMEOUT_MS = 30_000;
 const DEFAULT_LIMIT = 20;
@@ -527,7 +528,7 @@ async function execute(input: Record<string, unknown>, ctx: ExecutionScope): Pro
             lines.push(`${i + 1}. **[${platform}]** ${title}`);
           });
         }
-        lines.push(`_$0.005 paid via x402._`);
+        lines.push(receiptLine(0.005));
         return { output: frameUntrusted('Prediction-market data (untrusted)', lines.join('\n')) };
       }
 
@@ -573,7 +574,7 @@ async function execute(input: Record<string, unknown>, ctx: ExecutionScope): Pro
           if (winRate != null) parts.push(`win ${formatPct(winRate as number, 0)}`);
           lines.push(`${i + 1}. \`${w}\`${handle}` + (parts.length > 0 ? ` — ${parts.join(' · ')}` : ''));
         });
-        lines.push('', `_$0.001 paid via x402._`);
+        lines.push('', receiptLine(0.001));
         return { output: frameUntrusted('Prediction-market data (untrusted)', lines.join('\n')) };
       }
 
@@ -684,7 +685,7 @@ async function execute(input: Record<string, unknown>, ctx: ExecutionScope): Pro
           }
           if (recent.length > 0) lines.push(`   ${recent.join(' · ')}`);
         });
-        lines.push('', `_$0.005 paid via x402._`);
+        lines.push('', receiptLine(0.005));
         return { output: frameUntrusted('Prediction-market data (untrusted)', lines.join('\n')) };
       }
 
@@ -760,7 +761,7 @@ async function execute(input: Record<string, unknown>, ctx: ExecutionScope): Pro
             });
           }
         }
-        lines.push('', `_$0.005 paid via x402._`);
+        lines.push('', receiptLine(0.005));
         return { output: frameUntrusted('Prediction-market data (untrusted)', lines.join('\n')) };
       }
 
@@ -829,7 +830,7 @@ async function execute(input: Record<string, unknown>, ctx: ExecutionScope): Pro
           }
           lines.push(`${i + 1}. **${title}** — ${parts.join(' · ')}`);
         });
-        lines.push('', `_$0.005 paid via x402._`);
+        lines.push('', receiptLine(0.005));
         return { output: frameUntrusted('Prediction-market data (untrusted)', lines.join('\n')) };
       }
 
@@ -868,7 +869,7 @@ async function execute(input: Record<string, unknown>, ctx: ExecutionScope): Pro
           if (netBuyersPct != null) stats.push(`${formatPct(netBuyersPct as number, 0)} net buyers`);
           lines.push(`${i + 1}. **${title}**${cidTag}` + (stats.length > 0 ? `\n   ${stats.join(' · ')}` : ''));
         });
-        lines.push('', `_$0.005 paid via x402._`);
+        lines.push('', receiptLine(0.005));
         return { output: frameUntrusted('Prediction-market data (untrusted)', lines.join('\n')) };
       }
 
@@ -912,7 +913,7 @@ async function execute(input: Record<string, unknown>, ctx: ExecutionScope): Pro
           if (pos.avg_smart_win_rate != null) perf.push(`win ${formatPct(pos.avg_smart_win_rate, 0)}`);
           lines.push(`**Smart performance:** ${perf.join(' · ')}`);
         }
-        lines.push('', `_$0.005 paid via x402._`);
+        lines.push('', receiptLine(0.005));
         return { output: frameUntrusted('Prediction-market data (untrusted)', lines.join('\n')) };
       }
 
@@ -960,7 +961,7 @@ async function execute(input: Record<string, unknown>, ctx: ExecutionScope): Pro
             (end ? ` · ends ${String(end).slice(0, 10)}` : '')
           );
         });
-        lines.push('', `_$0.001 paid via x402._`);
+        lines.push('', receiptLine(0.001));
         return { output: frameUntrusted('Prediction-market data (untrusted)', lines.join('\n')) };
       }
 
@@ -998,7 +999,7 @@ async function execute(input: Record<string, unknown>, ctx: ExecutionScope): Pro
             (m.close_time ? ` · closes ${String(m.close_time).slice(0, 10)}` : '')
           );
         });
-        lines.push('', `_$0.001 paid via x402._`);
+        lines.push('', receiptLine(0.001));
         return { output: frameUntrusted('Prediction-market data (untrusted)', lines.join('\n')) };
       }
 

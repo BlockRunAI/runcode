@@ -42,6 +42,7 @@ import { gatewayBase, gatewayHeaders, isKeyMode } from '../payments/auth-mode.js
 import { walletReservation, AMBIGUOUS_GRACE_MS, type ReservationToken } from '../wallet/reservation.js';
 import { recordUsage } from '../stats/tracker.js';
 import { logger } from '../logger.js';
+import { noChargeNote } from '../payments/billing-copy.js';
 
 // ─── Pricing table (probed from /.well-known/x402 + 402 responses) ─────────
 const CREATE_PRICE_USD: Record<string, number> = {
@@ -456,7 +457,7 @@ export const modalCreateCapability: CapabilityHandler = {
       try {
         const answer = await ctx.onAskUser(lines.join('\n'), ['Approve', 'Cancel']);
         if (answer !== 'Approve') {
-          return { output: '## Sandbox creation cancelled\n\nNo USDC was spent.' };
+          return { output: `## Sandbox creation cancelled\n\n${noChargeNote()}` };
         }
       } catch {
         // askUser failed (UI gone) — fall through and create. Better than
