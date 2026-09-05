@@ -2,7 +2,9 @@
 
 **The AI agent with a wallet.**
 
-Franklin is a **general autonomous economic agent** — it doesn't just write text, it autonomously spends USDC from a user-funded wallet to execute real work — with **trading as the flagship vertical**. It is explicitly NOT positioned as a coding agent (decided 2026-07-17): file/shell tools are kept as general infrastructure (strategy scripts, data analysis) but faded from positioning, docs, and the default experience.
+_Billing has two rails as of 3.44.0: a USDC wallet (x402) or a prepaid BlockRun account key. Wallet is the identity and the story; the key is the on-ramp for people who would rather top up a balance. On-chain actions always need the wallet._
+
+Franklin is a **general autonomous economic agent** — it doesn't just write text, it autonomously spends real money (USDC from a user-funded wallet, or prepaid account credits) to execute real work — with **trading as the flagship vertical**. It is explicitly NOT positioned as a coding agent (decided 2026-07-17): file/shell tools are kept as general infrastructure (strategy scripts, data analysis) but faded from positioning, docs, and the default experience.
 
 Capability pillars:
 - **Trading agent (flagship)** — signals, portfolio, risk, trade-plan approvals, wallet-keyed journal, persistent P&L
@@ -72,6 +74,7 @@ src/
 | Layer | Message | Audience |
 |-------|---------|----------|
 | External (X, YouTube, KOL) | **The AI Agent with a Wallet** — it holds your USDC and actually spends it for you | Everyone |
+| Onboarding | **Or just top up an account** — `franklin login brk_...` for people not ready to fund a wallet | Newcomers |
 | Core users / docs | **Autonomous Economic Agent** powered by x402 payment layer | Crypto AI community, power users |
 | Product direction | **Trading flagship + general autonomy** — mission-control fleet, one agent per strategy/market | Power users |
 
@@ -84,5 +87,5 @@ The moat is the payment layer plus the safety architecture around autonomous spe
 
 **What sets Franklin apart:**
 - Most agents can think but can't spend; the ones that spend have no guardrails
-- Franklin: you fund the wallet and set the budget; it proposes, you approve, it executes and journals every trade
+- Franklin: you fund it (wallet or account credits) and set the budget; it proposes, you approve, it executes and journals every trade
 - Memory follows the wallet, goals survive sessions, and the whole fleet is visible in one panel

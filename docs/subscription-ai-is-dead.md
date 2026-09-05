@@ -90,9 +90,11 @@ The model that wins looks like this:
 - **Smart routers** pick the best provider per task from a
   cross-vendor pool, and the wallet doesn't know or care who
   answered.
-- **The wallet is identity.** There is no account, no KYC, no email,
-  no phone. The public address that signed the last micropayment is
-  the user.
+- **The wallet is identity.** No KYC, no email, no phone. The public
+  address that signed the last micropayment is the user. (Franklin
+  also accepts a prepaid account key for people who would rather top
+  up a balance — the same per-call pricing, a different on-ramp. The
+  wallet path is the one that needs no account at all.)
 
 The technical label for this is **x402 micropayments**. The business
 label is **YOPO — You Only Pay Outcome**. The product-category label
@@ -147,7 +149,8 @@ franklin
 ```
 
 Free-tier models run at $0.00. Funded models run at market rates.
-Either way, no subscription, no API key, no account.
+Either way, no subscription — and on the wallet path, no API key and
+no account either.
 
 That is what the next decade of AI pricing looks like. It is already
 shipping.

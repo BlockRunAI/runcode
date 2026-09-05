@@ -189,7 +189,12 @@ franklin                 # start — free NVIDIA models by default
 Top up the wallet with $5 of USDC and every frontier model is
 reachable. Top up with $0 and Franklin still runs — on free tier
 models. There is no subscription. There is no rate limit that isn't
-the wallet itself. There is no tier. There is no account.
+the wallet itself. There is no tier, and on this path, no account.
+
+(If you would rather not hold USDC, `franklin login` takes a prepaid
+account key instead. Same per-call pricing, same free tier; you trade
+the account-free property for a card. On-chain actions still need the
+wallet.)
 
 Franklin is the smallest honest move: *if an agent is going to act
 with autonomy, give it something it can lose.* A wallet. Not trust.
