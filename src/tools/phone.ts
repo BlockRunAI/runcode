@@ -27,6 +27,7 @@ import { loadChain, VERSION} from '../config.js';
 import { gatewayBase, gatewayHeaders } from '../payments/auth-mode.js';
 import { logger } from '../logger.js';
 import { recordUsage } from '../stats/tracker.js';
+import { chargedNote, noChargeNote, cancelHint } from '../payments/billing-copy.js';
 
 const PHONE_TIMEOUT_MS = 30_000;
 
@@ -173,7 +174,7 @@ export const listPhoneNumbersCapability: CapabilityHandler = {
     description:
       'List the phone numbers your wallet currently owns (US/CA, leased 30 days at a time). ' +
       'Use this before any phone-related action to remind the agent what numbers are available. ' +
-      'Costs $0.001 USDC. Returns each number with country, area code, expiration timestamp, ' +
+      'Costs $0.001 per call. Returns each number with country, area code, expiration timestamp, ' +
       'and current status (active/expiring/expired).',
     input_schema: { type: 'object', properties: {} },
   },
@@ -184,7 +185,7 @@ export const listPhoneNumbersCapability: CapabilityHandler = {
       );
       return {
         output:
-          `## Phone numbers (wallet-owned)\n\n` +
+          `## Phone numbers (provisioned to this account)\n\n` +
           '```json\n' + JSON.stringify(res, null, 2) + '\n```',
       };
     } catch (err) {
@@ -197,7 +198,7 @@ export const buyPhoneNumberCapability: CapabilityHandler = {
   spec: {
     name: 'BuyPhoneNumber',
     description:
-      'Provision a new US or CA phone number for the wallet for 30 days. Costs $5 USDC. ' +
+      'Provision a new US or CA phone number for 30 days. Costs $5.00 per number. ' +
       'Optionally pin a 3-digit area code (best effort). The provisioned number is auto-registered ' +
       'as a valid caller ID for outbound VoiceCall. A wallet can hold multiple numbers; this adds ' +
       'one, never replaces. To pick the country: country="US" (default) or country="CA".',
@@ -219,11 +220,11 @@ export const buyPhoneNumberCapability: CapabilityHandler = {
     const autoApprove = process.env.FRANKLIN_MEDIA_AUTO_APPROVE_ALL === '1';
     if (!autoApprove && ctx.onAskUser) {
       const answer = await ctx.onAskUser(
-        `Buy a new ${body.country || 'US'} phone number for $5.00 USDC? No USDC is spent if you cancel.`,
+        `Buy a new ${body.country || 'US'} phone number for $5.00? ${cancelHint()}`,
         ['Buy', 'Cancel'],
       );
       if (answer !== 'Buy') {
-        return { output: `## Phone number purchase cancelled\n\nNo USDC was spent.` };
+        return { output: `## Phone number purchase cancelled\n\n${noChargeNote()}` };
       }
     }
     try {
@@ -232,7 +233,7 @@ export const buyPhoneNumberCapability: CapabilityHandler = {
       );
       return {
         output:
-          `## Number provisioned ($5 USDC charged)\n\n` +
+          `## Number provisioned (${chargedNote(5)})\n\n` +
           '```json\n' + JSON.stringify(res, null, 2) + '\n```',
       };
     } catch (err) {
@@ -245,7 +246,7 @@ export const renewPhoneNumberCapability: CapabilityHandler = {
   spec: {
     name: 'RenewPhoneNumber',
     description:
-      'Extend the 30-day lease on a wallet-owned phone number. Costs $5 USDC. Use ListPhoneNumbers ' +
+      'Extend the 30-day lease on a BlockRun-provisioned phone number. Costs $5.00. Use ListPhoneNumbers ' +
       'first to confirm the number is yours. Released or expired numbers cannot be renewed — buy a ' +
       'new one with BuyPhoneNumber instead.',
     input_schema: {
@@ -264,11 +265,11 @@ export const renewPhoneNumberCapability: CapabilityHandler = {
     const autoApprove = process.env.FRANKLIN_MEDIA_AUTO_APPROVE_ALL === '1';
     if (!autoApprove && ctx.onAskUser) {
       const answer = await ctx.onAskUser(
-        `Renew ${input.phone_number} for 30 days at $5.00 USDC? No USDC is spent if you cancel.`,
+        `Renew ${input.phone_number} for 30 days at $5.00? ${cancelHint()}`,
         ['Renew', 'Cancel'],
       );
       if (answer !== 'Renew') {
-        return { output: `## Renewal cancelled\n\nNo USDC was spent.` };
+        return { output: `## Renewal cancelled\n\n${noChargeNote()}` };
       }
     }
     try {
@@ -280,7 +281,7 @@ export const renewPhoneNumberCapability: CapabilityHandler = {
       );
       return {
         output:
-          `## Lease renewed (+30 days, $5 USDC charged)\n\n` +
+          `## Lease renewed (+30 days, ${chargedNote(5)})\n\n` +
           '```json\n' + JSON.stringify(res, null, 2) + '\n```',
       };
     } catch (err) {
@@ -293,7 +294,7 @@ export const releasePhoneNumberCapability: CapabilityHandler = {
   spec: {
     name: 'ReleasePhoneNumber',
     description:
-      'Release a wallet-owned phone number back to the BlockRun pool before its lease expires. ' +
+      'Release a BlockRun-provisioned phone number back to the pool before its lease expires. ' +
       'Free. The number is gone after this — it may be picked up by another wallet. Use when you ' +
       "no longer need a test number and want it out of your ListPhoneNumbers result.",
     input_schema: {
@@ -331,8 +332,8 @@ export const phoneLookupCapability: CapabilityHandler = {
     name: 'PhoneLookup',
     description:
       'Look up carrier and line type information for ANY phone number (does not need to be ' +
-      'wallet-owned). Returns carrier name, line type (mobile/landline/voip), country, and ' +
-      'portability info. Costs $0.01 USDC. Use to validate a number before texting/calling or ' +
+      'BlockRun-provisioned). Returns carrier name, line type (mobile/landline/voip), country, and ' +
+      'portability info. Costs $0.01 per lookup. Use to validate a number before texting/calling or ' +
       'to figure out whether a contact number is a real mobile.',
     input_schema: {
       type: 'object',
@@ -355,7 +356,7 @@ export const phoneLookupCapability: CapabilityHandler = {
       );
       return {
         output:
-          `## Phone lookup ($0.01 USDC charged)\n\n` +
+          `## Phone lookup (${chargedNote(0.01)})\n\n` +
           '```json\n' + JSON.stringify(res, null, 2) + '\n```',
       };
     } catch (err) {
@@ -392,7 +393,7 @@ export const phoneFraudCheckCapability: CapabilityHandler = {
       );
       return {
         output:
-          `## Fraud check ($0.05 USDC charged)\n\n` +
+          `## Fraud check (${chargedNote(0.05)})\n\n` +
           '```json\n' + JSON.stringify(res, null, 2) + '\n```',
       };
     } catch (err) {

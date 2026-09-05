@@ -7,7 +7,7 @@
  *  - VoiceStatus — GET  /v1/voice/call/{call_id} (free). Polls for transcript
  *                  + recording + final disposition.
  *
- * Voice calls require a wallet-owned BlockRun phone number as caller ID —
+ * Voice calls require a BlockRun-provisioned phone number as caller ID —
  * use BuyPhoneNumber (or ListPhoneNumbers if one already exists) before
  * calling VoiceCall, otherwise the gateway returns 400 with the buy
  * instructions inline.
@@ -32,6 +32,7 @@ import { logger } from '../logger.js';
 import { recordUsage } from '../stats/tracker.js';
 import { frameUntrusted } from './untrusted.js';
 import { CallLog, type CallStatus } from '../phone/call-log.js';
+import { chargedNote } from '../payments/billing-copy.js';
 
 /** Singleton, lazy — paths are computed at first use so tests can stub homedir. */
 let _callLog: CallLog | null = null;
@@ -260,7 +261,7 @@ export const voiceCallCapability: CapabilityHandler = {
       'Common use cases: appointment reminders, verification callbacks, voice surveys, customer ' +
       'outreach, OTP retrieval, two-party verification calls.\n\n' +
       'Requirements:\n' +
-      '  - `from` MUST be a wallet-owned BlockRun phone number — use ListPhoneNumbers to find ' +
+      '  - `from` MUST be a BlockRun-provisioned phone number — use ListPhoneNumbers to find ' +
       'one or BuyPhoneNumber to provision one ($5, 30-day lease).\n' +
       '  - `to` and `from` must be E.164 format (+ country code prefix, e.g. +14155552671).\n' +
       '  - `task` must be ≥10 chars, ≤4000 chars.\n' +
@@ -342,7 +343,7 @@ export const voiceCallCapability: CapabilityHandler = {
   },
   execute: async (input, ctx): Promise<CapabilityResult> => {
     if (typeof input.to !== 'string') return { output: 'to (E.164) required', isError: true };
-    if (typeof input.from !== 'string') return { output: 'from (wallet-owned E.164) required — use ListPhoneNumbers / BuyPhoneNumber', isError: true };
+    if (typeof input.from !== 'string') return { output: 'from (BlockRun-provisioned E.164) required — use ListPhoneNumbers / BuyPhoneNumber', isError: true };
     if (typeof input.task !== 'string' || input.task.length < 10) {
       return { output: 'task required (10–4000 chars natural-language description)', isError: true };
     }
@@ -386,7 +387,7 @@ export const voiceCallCapability: CapabilityHandler = {
       } catch { /* best-effort */ }
       return {
         output:
-          `## Voice call initiated ($0.54 USDC charged)\n\n` +
+          `## Voice call initiated (${chargedNote(0.54)})\n\n` +
           `**call_id:** \`${callId}\`\n\nPoll with VoiceStatus call_id="${callId}" to get the ` +
           `transcript and disposition. The call typically completes in 1–6 minutes.\n\n` +
           '```json\n' + JSON.stringify(res, null, 2) + '\n```',

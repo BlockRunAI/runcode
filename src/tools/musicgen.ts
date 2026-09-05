@@ -34,6 +34,7 @@ import type { ContentLibrary } from '../content/library.js';
 import { isWalletKeyPath } from './sensitive-paths.js';
 import { findModel, estimateCostUsd, type GatewayModel } from '../gateway-models.js';
 import { recordUsage } from '../stats/tracker.js';
+import { noChargeNote } from '../payments/billing-copy.js';
 
 interface MusicGenInput {
   prompt: string;
@@ -101,7 +102,7 @@ function buildExecute(deps: MusicGenDeps) {
     if (contentId && deps.library) {
       const content = deps.library.get(contentId);
       if (!content) {
-        return { output: `Content ${contentId} not found. No USDC was spent.` };
+        return { output: `Content ${contentId} not found. ${noChargeNote()}` };
       }
       if (content.spentUsd + trackCostUsd > content.budgetUsd + 1e-9) {
         return {
@@ -109,7 +110,7 @@ function buildExecute(deps: MusicGenDeps) {
             `## Music generation skipped\n` +
             `- Would exceed budget: spent $${content.spentUsd.toFixed(2)} + fixed ` +
             `$${trackCostUsd.toFixed(2)} > cap $${content.budgetUsd.toFixed(2)}\n\n` +
-            `No USDC was spent.`,
+            noChargeNote(),
         };
       }
     }
@@ -331,7 +332,7 @@ export function createMusicGenCapability(deps: MusicGenDeps = {}): CapabilityHan
       description:
         "Generate a ~3-minute MP3 track from a text prompt (plus optional " +
         "lyrics or instrumental flag). Calls BlockRun's /v1/audio/generations. " +
-        "Costs $0.1575 USDC per call — bills a flat rate, MiniMax ignores " +
+        "Costs $0.1575 per call — bills a flat rate, MiniMax ignores " +
         "duration hints and always returns ~3 min. Generation takes 1–3 " +
         "minutes. ALWAYS confirm with the user before calling — music is " +
         "expensive and slow. Pass contentId to attach to a Content piece " +

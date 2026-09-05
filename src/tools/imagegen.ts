@@ -26,6 +26,7 @@ import { findModel, estimateCostUsd, GATEWAY_MARGIN, type GatewayModel } from '.
 import { logger } from '../logger.js';
 import { ssrfSafeFetch } from './ssrf.js';
 import { isWalletKeyPath } from './sensitive-paths.js';
+import { noChargeNote, cancelHint } from '../payments/billing-copy.js';
 
 interface ImageGenInput {
   prompt: string;
@@ -352,7 +353,7 @@ function buildExecute(deps: ImageGenDeps) {
           output:
             `## Image generation skipped\n` +
             `- ${decision.reason}\n\n` +
-            `No USDC was spent. Choose a cheaper model/size or raise the ` +
+            `${noChargeNote()} Choose a cheaper model/size or raise the ` +
             `content budget before trying again.`,
         };
       }
@@ -368,11 +369,11 @@ function buildExecute(deps: ImageGenDeps) {
       const priceNote = est > 0 ? ` for ~$${est.toFixed(2)}` : '';
       const countNote = n > 1 ? `${n} images` : 'an image';
       const answer = await ctx.onAskUser(
-        `Generate ${countNote} with ${imageModel}${priceNote}? No USDC is spent if you cancel.`,
+        `Generate ${countNote} with ${imageModel}${priceNote}? ${cancelHint()}`,
         ['Generate', 'Cancel'],
       );
       if (answer !== 'Generate') {
-        return { output: `## Image generation cancelled\n\nNo USDC was spent.` };
+        return { output: `## Image generation cancelled\n\n${noChargeNote()}` };
       }
     }
 
@@ -805,7 +806,7 @@ export function createImageGenCapability(deps: ImageGenDeps = {}): CapabilityHan
         "Generate or edit an image. Text-to-image from a prompt, or " +
         "image-to-image when you pass a reference image (style transfer, " +
         "character consistency, edits). Supports mask-based inpainting and " +
-        "multi-image fusion. Costs USDC from the user's wallet — confirm " +
+        "multi-image fusion. Billed per image — confirm " +
         "before generating. Saves to local file(s). Default size: 1024x1024. " +
         "Do NOT call repeatedly to iterate on style — ask the user first. " +
         "Pass contentId to attach the result to an existing Content piece: " +

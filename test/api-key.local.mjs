@@ -649,6 +649,68 @@ test('the system prompt does not promise a wallet in key mode', async () => {
   assert.match(keyPrompt, /Don't hesitate on cents/);
 });
 
+// ── Billing copy ──────────────────────────────────────────────────────────
+// These strings are the receipt the user reads, the prompt they approve, and
+// the text the model reasons over when deciding what it can afford.
+
+test('billing copy names the instrument that actually paid', async () => {
+  const copy = await import('../dist/payments/billing-copy.js');
+
+  clean();
+  auth.resetPayModeCache();
+  assert.match(copy.chargedNote(5), /\$5\.00 USDC charged/);
+  assert.match(copy.noChargeNote(), /No USDC was spent/);
+  assert.match(copy.cancelHint(), /No USDC is spent if you cancel/);
+  assert.match(copy.receiptLine(0.005), /\$0\.0050 paid via x402/);
+
+  process.env.BLOCKRUN_API_KEY = VALID_KEY;
+  auth.resetPayModeCache();
+  for (const s of [copy.chargedNote(5), copy.noChargeNote(), copy.cancelHint(), copy.receiptLine(0.005)]) {
+    assert.doesNotMatch(s, /USDC/, `key mode must not say USDC: ${s}`);
+    assert.doesNotMatch(s, /x402/, `key mode must not say x402: ${s}`);
+  }
+  assert.match(copy.chargedNote(5), /account credits/);
+  // Key mode states no amount on a receipt: the local figure is an estimate
+  // and the account ledger is authoritative.
+  assert.doesNotMatch(copy.chargedNote(5), /\$5/, 'no local amount presented as the charge');
+  // Sub-cent tiers must not render as $0.00 in wallet mode.
+  clean();
+  auth.resetPayModeCache();
+  assert.match(copy.receiptLine(0.001), /\$0\.0010/);
+  clean();
+});
+
+test('the mode is read at call time, not captured at import', async () => {
+  // invalidateKey() demotes a session to wallet mode mid-run after a 401.
+  // A helper that memoised the mode would keep printing "account credits"
+  // while Franklin was signing from the wallet again.
+  const { chargedNote } = await import('../dist/payments/billing-copy.js');
+  clean();
+  process.env.BLOCKRUN_API_KEY = VALID_KEY;
+  auth.resetPayModeCache();
+  assert.match(chargedNote(1), /account credits/);
+  auth.invalidateKey();
+  assert.match(chargedNote(1), /USDC charged/, 'demotion must change the copy immediately');
+  clean();
+});
+
+test('no paid tool states a payment rail unconditionally', async () => {
+  // Regression fence for the whole class. Every one of these was a live
+  // string that fired in key mode before this change.
+  const files = ['phone', 'prediction', 'videogen', 'imagegen', 'musicgen', 'voice', 'modal', 'blockrun', 'surf', 'realface', 'exa', 'rpc', 'defillama'];
+  const offenders = [];
+  for (const f of files) {
+    const src = await readFile(new URL(`../src/tools/${f}.ts`, import.meta.url), 'utf-8');
+    src.split('\n').forEach((line, i) => {
+      if (/paid via x402|USDC charged|No USDC (is|was) spent|USDC from the user's wallet|wallet-owned/.test(line)) {
+        offenders.push(`src/tools/${f}.ts:${i + 1}: ${line.trim().slice(0, 90)}`);
+      }
+    });
+  }
+  assert.deepEqual(offenders, [],
+    `use the billing-copy helpers (or mode-neutral wording in static spec text):\n${offenders.join('\n')}`);
+});
+
 test('cleanup', () => {
   clean();
   rmSync(TEST_HOME, { recursive: true, force: true });
