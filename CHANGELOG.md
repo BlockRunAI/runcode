@@ -42,6 +42,17 @@ wallet" while account credits sat there. They read the credit balance now, and
 an ungated account or an unreachable gateway means no local ceiling rather than
 an invented one.
 
+**The agent was told the account host was an alias of the Base gateway.** It is
+not. `api.blockrun.ai` authenticates a bearer key and 401s without one; the
+wallet hosts answer a 402 challenge and ignore a key entirely. Calling them
+aliases invited the model to send a wallet-signed request to a host that cannot
+settle it, or a key to a host that cannot read it. The gateway section now names
+the ONE host the session is actually on — `api.blockrun.ai` for a key,
+`sol.blockrun.ai/api` for Solana, `blockrun.ai/api` for Base — and says plainly
+which hosts are not yours and why. The instruction cache is keyed on the chain
+as well as the pay mode, so a base-to-solana switch cannot serve the previous
+chain's host.
+
 **A Solana zero is the SDK's error value, not a balance.** `getBalance()`
 catches every transport error and returns 0, and an RPC that answers 200 with a
 JSON-RPC error body reaches the same 0. The reservation layer could not tell an
