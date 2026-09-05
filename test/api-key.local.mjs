@@ -706,17 +706,30 @@ test('billing copy names the instrument that actually paid', async () => {
 });
 
 test('the mode is read at call time, not captured at import', async () => {
-  // invalidateKey() demotes a session to wallet mode mid-run after a 401.
-  // A helper that memoised the mode would keep printing "account credits"
-  // while Franklin was signing from the wallet again.
+  // The mode can change mid-process, so a helper that memoised it at import
+  // would keep printing "account credits" while Franklin signed from the
+  // wallet. `--wallet` (useWalletMode) is the lever that actually flips it.
+  //
+  // Not invalidateKey(): since #158 that only refreshes a rejected credential
+  // and deliberately does NOT demote to wallet billing, because an account
+  // failure is never permission to spend from a wallet. Asserted below so this
+  // test cannot drift back to the old assumption.
   const { chargedNote } = await import('../dist/payments/billing-copy.js');
+
   clean();
   process.env.BLOCKRUN_API_KEY = VALID_KEY;
   auth.resetPayModeCache();
   assert.match(chargedNote(1), /account credits/);
+
   auth.invalidateKey();
-  assert.match(chargedNote(1), /USDC charged/, 'demotion must change the copy immediately');
+  assert.match(chargedNote(1), /account credits/,
+    'a rejected key must not silently move billing to the wallet');
+
+  auth.useWalletMode();
+  assert.match(chargedNote(1), /USDC charged/,
+    'an explicit --wallet switch must change the copy immediately');
   clean();
+  auth.resetPayModeCache();
 });
 
 test('no paid tool states a payment rail unconditionally', async () => {
