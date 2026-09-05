@@ -214,3 +214,46 @@ test('paid request succeeds -> normal release, no ambiguity', async () => {
   assert.equal(snap.ambiguousCount, 0);
   assert.equal(snap.totalUsd, 0);
 });
+
+// ── blockrun#140: a Solana zero is the SDK's error value, not a balance ─────
+
+test('readSolanaBalance refuses to report a zero as a balance', async () => {
+  const { readSolanaBalance } = await import('../dist/wallet/reservation.js');
+  assert.equal(await readSolanaBalance(async () => 4.2), 4.2, 'a real balance passes through');
+  await assert.rejects(() => readSolanaBalance(async () => 0), /treating the balance as unknown/,
+    'zero is indistinguishable from an RPC failure and must not be reported');
+  // A genuine transport error already threw before reaching us.
+  await assert.rejects(() => readSolanaBalance(async () => { throw new Error('ECONNRESET'); }), /ECONNRESET/);
+});
+
+test('an untrustworthy balance read fails open instead of refusing every paid tool', async () => {
+  walletReservation._resetForTests(async () => {
+    throw new Error('Solana balance read returned 0 — treating the balance as unknown');
+  });
+  const token = await walletReservation.hold(0.04);
+  assert.ok(token, 'an RPC blip must not block a paid call the payment layer would accept');
+  walletReservation.release(token);
+});
+
+test('an untrustworthy read does not prune ambiguous holds', async () => {
+  // The second half of #140: pruning against a fake 0 would drop a settlement
+  // that may really have landed, freeing headroom that is not free.
+  let mode = 'ok';
+  walletReservation._resetForTests(async () => {
+    if (mode === 'ok') return 0.10;
+    throw new Error('treating the balance as unknown');
+  });
+
+  const a = await walletReservation.hold(0.06);
+  assert.ok(a);
+  walletReservation.markAmbiguous(a, 1_000);
+  assert.equal(walletReservation.snapshot().ambiguousCount, 1);
+
+  // Age the entry past its window, then read a balance that reflects nothing.
+  walletReservation._ageAmbiguousForTests(5_000);
+  mode = 'unknown';
+  await walletReservation.hold(0.001);
+
+  assert.equal(walletReservation.snapshot().ambiguousCount, 1,
+    'an ambiguous hold must survive a read that could not see it');
+});
