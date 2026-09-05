@@ -456,6 +456,199 @@ test('surf quotes one flat price, computed rather than typed', async () => {
   assert.match(desc, /settlement fee/, 'and names the wallet-rail fee separately');
 });
 
+// ── Credential containment ────────────────────────────────────────────────
+// The key spends against a prepaid balance with no per-call signature, so it
+// gets the same containment the wallet private keys already had.
+
+test('the API key never reaches a Bash subprocess', async () => {
+  clean();
+  process.env.BLOCKRUN_API_KEY = VALID_KEY;
+  const { bashCapability } = await import('../dist/tools/bash.js');
+  const ctx = { workingDir: TEST_HOME, abortSignal: new AbortController().signal };
+
+  // printenv and echo are auto-approved by bash-guard, so this is the exact
+  // command that needed no confirmation before the fix.
+  const printed = await bashCapability.execute({ command: 'printenv BLOCKRUN_API_KEY || echo ABSENT' }, ctx);
+  assert.ok(!printed.output.includes(VALID_KEY), 'key must not appear in Bash output');
+  assert.match(printed.output, /ABSENT/, 'the variable is unset in the child, not merely empty');
+
+  // The parent process still has it — Franklin's own gateway calls read
+  // process.env in-process and must be unaffected.
+  assert.equal(process.env.BLOCKRUN_API_KEY, VALID_KEY, 'parent env is untouched');
+  clean();
+});
+
+test('the on-disk API key is guarded like a wallet private key', async () => {
+  const { isWalletKeyPath, WALLET_KEY_PATHS } = await import('../dist/tools/sensitive-paths.js');
+  assert.equal(isWalletKeyPath(KEY_FILE), true, '~/.blockrun/api-key must be protected');
+  assert.ok(WALLET_KEY_PATHS.includes(KEY_FILE), 'and listed among the guarded paths');
+  // Not a blanket ban on the directory.
+  assert.equal(isWalletKeyPath(join(BLOCKRUN_DIR, 'sessions.json')), false);
+  assert.equal(isWalletKeyPath(KEY_FILE + '.bak'), false, 'exact file only, not siblings');
+});
+
+test('tool output is scrubbed of a key that reaches it by any route', async () => {
+  const { redactSecretsInOutput } = await import('../dist/agent/secret-redact.js');
+
+  // Pattern route: a brk_ key embedded in output nobody vetted.
+  const shaped = redactSecretsInOutput(`config: BLOCKRUN_API_KEY=${VALID_KEY} done`);
+  assert.ok(!shaped.text.includes(VALID_KEY), 'shaped key is removed');
+  assert.match(shaped.text, /\[REDACTED:blockrun_api_key\]/);
+  assert.ok(shaped.labels.includes('blockrun_api_key'));
+
+  // Literal route: a configured key that does not match a published shape
+  // still gets scrubbed, because the caller passes the live value.
+  const odd = 'legacy-key-not-brk-shaped-01234567';
+  const literal = redactSecretsInOutput(`token=${odd}`, [odd]);
+  assert.ok(!literal.text.includes(odd), 'configured literal is removed');
+  assert.ok(literal.labels.includes('configured_credential'));
+
+  // Every occurrence, not just the first.
+  const twice = redactSecretsInOutput(`${VALID_KEY} and again ${VALID_KEY}`);
+  assert.ok(!twice.text.includes(VALID_KEY), 'all occurrences removed');
+
+  // Clean output is returned untouched, and a blank/short literal cannot
+  // blank out the text.
+  const clean1 = redactSecretsInOutput('nothing secret here', ['', '   ', 'ab']);
+  assert.equal(clean1.text, 'nothing secret here');
+  assert.deepEqual(clean1.labels, []);
+});
+
+test('the tool-result funnel actually applies the redactor', async () => {
+  // The unit test above proves redactSecretsInOutput works. This proves it is
+  // wired: streaming-executor is the single choke point every tool result
+  // passes through, and the scrub must happen BEFORE the persist-to-disk
+  // branch or an oversized result would be written to disk unredacted.
+  const src = await readFile(new URL('../dist/agent/streaming-executor.js', import.meta.url), 'utf-8');
+  // Anchor on the assignment that applies the scrub and on the persist CALL
+  // SITE (`output: persistLargeResult(`), not the function definition near
+  // the top of the file.
+  const applied = src.indexOf('output: redacted.text');
+  const persistCall = src.indexOf('output: persistLargeResult(');
+  assert.ok(applied > 0, 'streaming-executor must apply the redacted output to the result');
+  assert.ok(persistCall > 0, 'sanity: the persist call site still exists');
+  assert.ok(applied < persistCall, 'redaction must run before the result is persisted to disk');
+});
+
+test('key mode does not gate Modal on a wallet balance it does not have', async () => {
+  clean();
+  process.env.BLOCKRUN_API_KEY = VALID_KEY;
+  auth.resetPayModeCache();
+  assert.equal(auth.isKeyMode(), true, 'precondition: key mode is active');
+
+  const { walletReservation } = await import('../dist/wallet/reservation.js');
+  walletReservation._resetForTests(); // real balance path, empty cache
+
+  // Record what the balance read actually asks for. Asserting on this is what
+  // makes the test see the branch: if key mode fell through to the wallet
+  // path it would talk to a chain RPC and never request /v1/credits.
+  const seen = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    seen.push(String(url instanceof Request ? url.url : url));
+    return new Response(
+      JSON.stringify({ account_id: 'acct_test', billing_mode: 'prepaid', currency: 'USD',
+                       granted_usd: 50, spent_usd: 10, remaining_usd: 40, blocked: false }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  };
+  try {
+    // No wallet exists under this temp HOME. Before the fix the balance read
+    // resolved to $0 and hold() refused every Modal call.
+    const token = await walletReservation.hold(0.01);
+    assert.ok(seen.some((u) => u.includes('/v1/credits')),
+      `balance must come from the credit endpoint, got: ${JSON.stringify(seen)}`);
+    assert.ok(token, 'a $0.01 hold must succeed against $40 of credit');
+    walletReservation.release(token);
+
+    // And the ceiling is real, not merely absent: $40 of credit refuses $41.
+    walletReservation._resetForTests();
+    assert.equal(await walletReservation.hold(41), null, 'a known credit balance still bounds holds');
+  } finally {
+    globalThis.fetch = originalFetch;
+    walletReservation._resetForTests();
+    clean();
+  }
+});
+
+test('an ungated account has no local ceiling rather than a zero one', async () => {
+  clean();
+  process.env.BLOCKRUN_API_KEY = VALID_KEY;
+  auth.resetPayModeCache();
+
+  const { walletReservation } = await import('../dist/wallet/reservation.js');
+  walletReservation._resetForTests();
+
+  const seen = [];
+  const originalFetch = globalThis.fetch;
+  // remaining_usd null is the documented ungated shape — never read as zero.
+  globalThis.fetch = async (url) => {
+    seen.push(String(url instanceof Request ? url.url : url));
+    return new Response(
+      JSON.stringify({ account_id: 'a', billing_mode: 'ungated', currency: 'USD',
+                       granted_usd: 0, spent_usd: 9999, remaining_usd: null, blocked: false }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  };
+  try {
+    const token = await walletReservation.hold(5);
+    assert.ok(seen.some((u) => u.includes('/v1/credits')), 'consulted the credit endpoint');
+    assert.ok(token, 'an ungated account must not be told it is broke');
+    walletReservation.release(token);
+  } finally {
+    globalThis.fetch = originalFetch;
+    walletReservation._resetForTests();
+    clean();
+  }
+});
+
+test('an unreachable credit endpoint does not strand a paying user', async () => {
+  clean();
+  process.env.BLOCKRUN_API_KEY = VALID_KEY;
+  auth.resetPayModeCache();
+
+  const { walletReservation } = await import('../dist/wallet/reservation.js');
+  walletReservation._resetForTests();
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('network down'); };
+  try {
+    // fetchCreditBalance returns null on any failure. Falling back to a wallet
+    // read here would reintroduce the bug; inventing $0 would be worse.
+    const token = await walletReservation.hold(0.01);
+    assert.ok(token, 'a gateway outage must not block a call the gateway would accept');
+    walletReservation.release(token);
+  } finally {
+    globalThis.fetch = originalFetch;
+    walletReservation._resetForTests();
+    clean();
+  }
+});
+
+test('the system prompt does not promise a wallet in key mode', async () => {
+  const { assembleInstructions } = await import('../dist/agent/context.js');
+
+  clean();
+  auth.resetPayModeCache();
+  const walletPrompt = assembleInstructions(TEST_HOME).join('\n');
+
+  process.env.BLOCKRUN_API_KEY = VALID_KEY;
+  auth.resetPayModeCache();
+  // Same workingDir on purpose: proves the instruction cache is keyed on the
+  // pay mode and does not serve the wallet-mode prompt to a key-mode session.
+  const keyPrompt = assembleInstructions(TEST_HOME).join('\n');
+  clean();
+
+  assert.match(walletPrompt, /agent with a wallet/, 'wallet mode keeps its identity line');
+  assert.doesNotMatch(keyPrompt, /an autonomous AI agent with a wallet/,
+    'key mode must not claim a wallet it does not have');
+  assert.doesNotMatch(keyPrompt, /wallet pays automatically/,
+    'key mode must not say the wallet pays');
+  assert.match(keyPrompt, /account credits/, 'key mode names the real funding source');
+  // The spend-without-hesitating posture survives the branch.
+  assert.match(keyPrompt, /Don't hesitate on cents/);
+});
+
 test('cleanup', () => {
   clean();
   rmSync(TEST_HOME, { recursive: true, force: true });

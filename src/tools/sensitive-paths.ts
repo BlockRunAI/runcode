@@ -1,5 +1,5 @@
 /**
- * Wallet secret-material guard for the model-facing file tools.
+ * Secret-material guard for the model-facing file tools.
  *
  * Franklin IS the wallet: a steered model (prompt injection via a fetched page,
  * MCP result, file contents, etc.) that can Read/Write/Edit arbitrary paths
@@ -12,14 +12,23 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { BLOCKRUN_DIR } from '../config.js';
+import { API_KEY_FILE, BLOCKRUN_DIR } from '../config.js';
 
-/** Private-key / wallet-secret files under ~/.blockrun. */
+/**
+ * Secret-material files under ~/.blockrun.
+ *
+ * Appended to, never reordered: test/local.mjs indexes this list positionally.
+ */
 const WALLET_KEY_FILES = [
   path.join(BLOCKRUN_DIR, '.session'),            // EVM private key (0x hex)
   path.join(BLOCKRUN_DIR, '.solana-session'),     // Solana secret key (base58)
   path.join(BLOCKRUN_DIR, '.solana-session-key2'),
   path.join(BLOCKRUN_DIR, 'solana-wallet.json'),  // legacy { address, private_key }
+  // Account bearer key (brk_...). Not a private key, but it spends: it draws
+  // on a prepaid balance with no per-call signature and no chain-level
+  // ceiling, so `cat ~/.blockrun/api-key` is exfiltration in one Read. It
+  // belongs behind the same guard as the wallet keys above.
+  API_KEY_FILE,
 ];
 
 // macOS (APFS) and Windows are case-INSENSITIVE by default, and fs.realpathSync

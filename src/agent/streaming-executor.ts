@@ -19,6 +19,8 @@ import type { HookEngine } from '../hooks/runner.js';
 import type { HookInput } from '../hooks/types.js';
 import { estimateSpendUsd, isSpendTool } from '../tools/spend-tools.js';
 import { BLOCKRUN_DIR } from '../config.js';
+import { redactSecretsInOutput } from './secret-redact.js';
+import { resolvePayMode } from '../payments/auth-mode.js';
 import { logger } from '../logger.js';
 
 interface PendingTool {
@@ -335,6 +337,23 @@ export class StreamingExecutor {
         // opener.
         const preview = (this.inputPreview(invocation) || '').replace(/[\r\n]+/g, ' ');
         logger.info(`[franklin] Slow tool: ${invocation.name} ${status} after ${(execElapsed / 1000).toFixed(1)}s${preview ? ` — ${preview.slice(0, 80)}` : ''}`);
+      }
+
+      // Scrub credentials before the output goes anywhere. This is the one
+      // funnel every tool result passes through, and it runs BEFORE the
+      // persist-to-disk branch below so a redacted body is what reaches the
+      // model, the transcript, and the on-disk overflow file alike.
+      //
+      // resolvePayMode() is memoised per process, so reading the configured
+      // key here costs nothing per tool call.
+      const payMode = resolvePayMode();
+      const redacted = redactSecretsInOutput(
+        result.output,
+        payMode.kind === 'key' ? [payMode.key] : [],
+      );
+      if (redacted.labels.length > 0) {
+        logger.warn(`[franklin] Redacted ${redacted.labels.join(', ')} from ${invocation.name} output`);
+        result = { ...result, output: redacted.text };
       }
 
       // Persist large results to disk with preview.

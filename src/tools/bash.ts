@@ -333,15 +333,26 @@ function executeCommand(command: string, timeoutMs: number, ctx: ExecutionScope)
     const shell = fs.existsSync('/bin/bash') ? '/bin/bash' : (process.env.SHELL || '/bin/sh');
     let child: ReturnType<typeof spawn>;
     try {
+      // The account bearer key is deliberately withheld from the subprocess.
+      // bash-guard auto-approves `printenv` and `echo` as safe, so
+      // `printenv BLOCKRUN_API_KEY` ran with no confirmation and returned the
+      // key as tool output — into the model prompt and the saved transcript.
+      // Wallet private keys are never in the environment at all; this gives
+      // the key the same treatment. Franklin's own gateway calls read
+      // process.env in-process and are unaffected, and a user who genuinely
+      // needs the key in a shell can export it there themselves.
+      const childEnv: NodeJS.ProcessEnv = {
+        ...process.env,
+        FRANKLIN: '1', // Let scripts detect they're running inside Franklin
+        FRANKLIN_WORKDIR: ctx.workingDir,
+        RUNCODE: '1', // Backwards compat
+        RUNCODE_WORKDIR: ctx.workingDir,
+      };
+      delete childEnv.BLOCKRUN_API_KEY;
+
       child = spawn(shell, ['-c', command], {
         cwd: ctx.workingDir,
-        env: {
-          ...process.env,
-          FRANKLIN: '1', // Let scripts detect they're running inside Franklin
-          FRANKLIN_WORKDIR: ctx.workingDir,
-          RUNCODE: '1', // Backwards compat
-          RUNCODE_WORKDIR: ctx.workingDir,
-        },
+        env: childEnv,
         stdio: ['ignore', 'pipe', 'pipe'],
         // Put the shell in its own process group (pgid = pid) so a timeout
         // can SIGTERM the entire tree. Without this, signalling only the

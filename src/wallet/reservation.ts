@@ -31,6 +31,7 @@
 
 import { setupAgentWallet, setupAgentSolanaWallet } from '@blockrun/llm';
 import { loadChain } from '../config.js';
+import { fetchCreditBalance, isKeyMode } from '../payments/auth-mode.js';
 
 export interface ReservationToken {
   id: string;
@@ -47,7 +48,22 @@ const BALANCE_CACHE_MS = 5_000;
  */
 export const AMBIGUOUS_GRACE_MS = 30_000;
 
-async function readChainBalance(): Promise<number> {
+async function readSpendableBalance(): Promise<number> {
+  // Key mode has no wallet to read. Gating on one made every Modal call fail
+  // with "Insufficient USDC — fund the wallet" for a user whose account
+  // credits were fine, because an unfunded (or absent) wallet reads $0.
+  //
+  // The right ceiling in key mode is the prepaid balance, so use it when the
+  // gateway reports one. `remainingUsd: null` means an ungated account with
+  // no ceiling, and a null balance means the gateway was unreachable — in
+  // both cases return Infinity rather than invent a limit. That is not
+  // "unbounded": the gateway still 402s when credits run out, and --max-spend
+  // still bounds the session. This layer only prevents Franklin from
+  // over-committing against a balance it can actually see.
+  if (isKeyMode()) {
+    const credit = await fetchCreditBalance().catch(() => null);
+    return credit?.remainingUsd ?? Number.POSITIVE_INFINITY;
+  }
   if (loadChain() === 'solana') {
     const client = await setupAgentSolanaWallet({ silent: true });
     return client.getBalance();
@@ -61,7 +77,7 @@ class WalletReservationManager {
   private ambiguous = new Map<string, { amountUsd: number; expiresAt: number }>();
   private cachedBalance: { value: number; fetchedAt: number } | null = null;
   private balanceFetchInflight: Promise<number> | null = null;
-  private balanceFetcher: () => Promise<number> = readChainBalance;
+  private balanceFetcher: () => Promise<number> = readSpendableBalance;
 
   private async fetchBalance(): Promise<number> {
     if (this.cachedBalance && Date.now() - this.cachedBalance.fetchedAt < BALANCE_CACHE_MS) {
@@ -181,7 +197,7 @@ class WalletReservationManager {
     this.ambiguous.clear();
     this.cachedBalance = null;
     this.balanceFetchInflight = null;
-    this.balanceFetcher = fetcher ?? readChainBalance;
+    this.balanceFetcher = fetcher ?? readSpendableBalance;
   }
 
   /** Testing only — seed the balance cache so hold() never touches RPC. */

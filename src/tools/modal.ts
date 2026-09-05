@@ -37,8 +37,8 @@ import {
   SOLANA_NETWORK,
 } from '@blockrun/llm';
 import type { CapabilityHandler, CapabilityResult, ExecutionScope } from '../agent/types.js';
-import { loadChain, VERSION} from '../config.js';
-import { gatewayBase, gatewayHeaders } from '../payments/auth-mode.js';
+import { loadChain, VERSION, DASHBOARD_URL } from '../config.js';
+import { gatewayBase, gatewayHeaders, isKeyMode } from '../payments/auth-mode.js';
 import { walletReservation, AMBIGUOUS_GRACE_MS, type ReservationToken } from '../wallet/reservation.js';
 import { recordUsage } from '../stats/tracker.js';
 import { logger } from '../logger.js';
@@ -278,8 +278,13 @@ function describeHeadroom(): string {
       `unconfirmed (released automatically after the on-chain balance refreshes)`,
     );
   }
-  if (parts.length === 0) return 'Fund the wallet.';
-  return parts.join('; ') + ' — wait for those to clear or fund the wallet.';
+  // In key mode there is no wallet to fund — the ceiling is the prepaid
+  // balance, so send the user to the right place.
+  const topUp = isKeyMode()
+    ? `Top up account credits at ${DASHBOARD_URL}.`
+    : 'Fund the wallet.';
+  if (parts.length === 0) return topUp;
+  return parts.join('; ') + ` — wait for those to clear, or ${topUp[0].toLowerCase()}${topUp.slice(1)}`;
 }
 
 function signalError(signal: AbortSignal): Error {
@@ -466,7 +471,7 @@ export const modalCreateCapability: CapabilityHandler = {
       if (!reservation) {
         return {
           output:
-            `Insufficient USDC for ModalCreate (${tier}, ~${fmtUsd(price)}). ` +
+            `Insufficient ${isKeyMode() ? 'account credit' : 'USDC'} for ModalCreate (${tier}, ~${fmtUsd(price)}). ` +
             describeHeadroom(),
           isError: true,
         };

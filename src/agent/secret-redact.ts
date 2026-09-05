@@ -259,6 +259,57 @@ export function redactSecrets(input: string): RedactionResult {
  * Returns the names of env vars that were set, deduped, in stash order.
  * Safe to call on an empty match list (no-op).
  */
+/**
+ * Redact secrets from text Franklin did not author — tool output, not user
+ * input.
+ *
+ * `redactSecrets` above is the INPUT path: it scrubs what a user pastes into
+ * chat and hands the caller the raw values to stash on process.env. That is
+ * the wrong contract here. Tool output flows straight into the model prompt
+ * (over the network, to whichever gateway model serves the turn) and into the
+ * persisted session transcript on disk, so the value must not survive at all
+ * and there is nothing to stash.
+ *
+ * The case that forced this: `printenv` and `echo` are auto-approved by
+ * bash-guard as safe commands, so `printenv BLOCKRUN_API_KEY` needed no
+ * confirmation and returned the account bearer key as tool output. Stripping
+ * the variable from the Bash subprocess env (tools/bash.ts) closes that exact
+ * command; this closes the class — a key can still reach output via a config
+ * file, a `curl -v` trace, an MCP result, or a shell history dump.
+ *
+ * `extraLiterals` carries values known only at runtime, e.g. the configured
+ * API key when it does not match a published prefix shape. Empty and very
+ * short entries are ignored so a blank env var cannot blank out the text.
+ */
+export function redactSecretsInOutput(
+  input: string,
+  extraLiterals: readonly string[] = [],
+): { text: string; labels: string[] } {
+  if (!input) return { text: input, labels: [] };
+  let text = input;
+  const labels: string[] = [];
+
+  for (const literal of extraLiterals) {
+    const value = literal?.trim();
+    // 8 is below any credential this guards and above the length at which a
+    // stray value would collide with ordinary output.
+    if (!value || value.length < 8) continue;
+    if (!text.includes(value)) continue;
+    text = text.split(value).join('[REDACTED:configured_credential]');
+    labels.push('configured_credential');
+  }
+
+  for (const { label, pattern } of SECRET_PATTERNS) {
+    pattern.lastIndex = 0;
+    if (!pattern.test(text)) continue;
+    pattern.lastIndex = 0;
+    text = text.replace(pattern, `[REDACTED:${label}]`);
+    labels.push(label);
+  }
+
+  return { text, labels: [...new Set(labels)] };
+}
+
 export function stashSecretsToEnv(matches: RedactionMatch[]): string[] {
   const set: string[] = [];
   for (const m of matches) {

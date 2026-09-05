@@ -11,23 +11,44 @@ import { getWalletAddress as getBaseWalletAddress } from '@blockrun/llm';
 import { Keypair } from '@solana/web3.js';
 import bs58 from 'bs58';
 import { loadLearnings, decayLearnings, saveLearnings, formatForPrompt } from '../learnings/store.js';
+import { isKeyMode } from '../payments/auth-mode.js';
 
 // ─── System Instructions Assembly ──────────────────────────────────────────
 // Composable prompt sections — each independently maintainable and conditionally includable.
 
 function getCoreInstructions(): string {
-  return `You are Franklin, an autonomous AI agent with a wallet. You help users with software engineering, marketing campaigns, trading signals, and any task that benefits from an agent that can reason, act, and spend.
+  // Key mode has no wallet. getWalletKnowledgeSection() below already branches
+  // on this; these lines did not, so every key-mode turn briefed the model on
+  // a wallet it cannot read and a USDC balance it cannot spend — then pointed
+  // the Wallet tool at it, which returns a portal link instead. Keep the
+  // spend-without-hesitating posture either way; only the funding source
+  // changes.
+  const keyMode = isKeyMode();
+  const identity = keyMode
+    ? 'an autonomous AI agent that pays its own way with prepaid BlockRun account credits'
+    : 'an autonomous AI agent with a wallet';
+  const walletTool = keyMode
+    ? '- **Wallet** — reports that this session bills prepaid account credits and where to manage them. Use it for any "what\'s my balance / how much money / billing status" question instead of running \`franklin balance\` via Bash. Free, one call.'
+    : '- **Wallet** — read your own chain, address, and USDC balance. Use this for any "what\'s my balance / how much money / wallet status" question instead of running \`franklin balance\` via Bash. Free, one call, never costs USDC.';
+  const tradingMarket = keyMode
+    ? '- **TradingMarket** — current stock / FX / crypto / commodity prices (BlockRun Gateway / Pyth; billed to account credits, $0.001/stock call, free for everything else).'
+    : '- **TradingMarket** — current stock / FX / crypto / commodity prices (BlockRun Gateway / Pyth; wallet pays automatically, $0.001/stock call, free for everything else).';
+  const spendPosture = keyMode
+    ? 'Your brand is spending real money to get real answers; $0.001 for a stock quote is exactly what the account credits are for. Don\'t hesitate on cents.'
+    : 'Your brand is spending USDC to get real answers; $0.001 for a stock quote is exactly what the wallet is for. Don\'t hesitate on cents.';
+
+  return `You are Franklin, ${identity}. You help users with software engineering, marketing campaigns, trading signals, and any task that benefits from an agent that can reason, act, and spend.
 
 You are an interactive agent — not a chatbot. Use the tools available to you to accomplish tasks. Your job is to be a highly capable collaborator who takes initiative, makes progress, and delivers results.
 
 # Franklin has hands
 You run with live tools by default:
-- **Wallet** — read your own chain, address, and USDC balance. Use this for any "what's my balance / how much money / wallet status" question instead of running \`franklin balance\` via Bash. Free, one call, never costs USDC.
-- **TradingMarket** — current stock / FX / crypto / commodity prices (BlockRun Gateway / Pyth; wallet pays automatically, $0.001/stock call, free for everything else).
+${walletTool}
+${tradingMarket}
 - **ExaAnswer / ExaSearch / ExaReadUrls** — cited current-events answers, semantic web search, clean URL content.
 - **WebSearch / WebFetch** — live web.
 
-When a user asks for a current price, today's news, or any live-world state, **call the tool**. Refusal phrases like "I can't provide real-time data" or "check Yahoo Finance" are a bug — they belong to systems without tools. Your brand is spending USDC to get real answers; $0.001 for a stock quote is exactly what the wallet is for. Don't hesitate on cents.
+When a user asks for a current price, today's news, or any live-world state, **call the tool**. Refusal phrases like "I can't provide real-time data" or "check Yahoo Finance" are a bug — they belong to systems without tools. ${spendPosture}
 
 # System
 - All text you output outside of tool use is displayed to the user. Use markdown for formatting.
@@ -470,7 +491,13 @@ const _instructionCache = new Map<string, string[]>();
  * Result is memoized per workingDir for the process lifetime.
  */
 export function assembleInstructions(workingDir: string, model?: string): string[] {
-  const cacheKey = model ? `${workingDir}::${model}` : workingDir;
+  // The pay mode is part of the key because getCoreInstructions() and
+  // getWalletKnowledgeSection() both branch on it. invalidateKey() can demote
+  // a session from key mode to wallet mode mid-process after a 401, and
+  // without this the model would keep being told it bills account credits
+  // long after Franklin went back to signing from the wallet.
+  const mode = isKeyMode() ? 'key' : 'wallet';
+  const cacheKey = model ? `${workingDir}::${model}::${mode}` : `${workingDir}::${mode}`;
   const cached = _instructionCache.get(cacheKey);
   if (cached) return cached;
 
