@@ -590,7 +590,7 @@ test('key mode does not gate Modal on a wallet balance it does not have', async 
     walletReservation._resetForTests();
     assert.equal(await walletReservation.hold(41), null, 'a known credit balance still bounds holds');
   } finally {
-    globalThis.fetch = originalFetch;
+    globalThis.fetch = realFetch;
     walletReservation._resetForTests();
     clean();
   }
@@ -621,7 +621,7 @@ test('an ungated account has no local ceiling rather than a zero one', async () 
     assert.ok(token, 'an ungated account must not be told it is broke');
     walletReservation.release(token);
   } finally {
-    globalThis.fetch = originalFetch;
+    globalThis.fetch = realFetch;
     walletReservation._resetForTests();
     clean();
   }
@@ -644,7 +644,7 @@ test('an unreachable credit endpoint does not strand a paying user', async () =>
     assert.ok(token, 'a gateway outage must not block a call the gateway would accept');
     walletReservation.release(token);
   } finally {
-    globalThis.fetch = originalFetch;
+    globalThis.fetch = realFetch;
     walletReservation._resetForTests();
     clean();
   }
@@ -806,6 +806,114 @@ test('no mode is told the account host is an alias of a wallet host', async () =
   auth.resetPayModeCache();
 });
 
+// ── /v1/usage reconciliation ──────────────────────────────────────────────
+// The four properties that turn a careless read of this feed into a confident
+// wrong answer: pending is not a settled zero, zero-cost rows are real answers,
+// unavailable_days is a short read, and only chat is locally checkable.
+
+const usageRow = (o) => ({
+  request_id: o.id, timestamp: '2026-09-05T12:00:00Z', endpoint: o.endpoint ?? '/v1/exa/search',
+  model: o.model ?? null, kind: o.kind ?? 'service', input_tokens: 0, output_tokens: 0,
+  cost_usd: o.cost ?? 0.01, cost_state: o.state ?? 'priced', status: 200,
+});
+
+const realFetch = globalThis.fetch;
+
+function mockUsage(pages) {
+  let i = 0;
+  globalThis.fetch = async (url) => {
+    const u = String(url instanceof Request ? url.url : url);
+    assert.match(u, /^https:\/\/api\.blockrun\.ai\/v1\/usage/, 'usage reads the account host only');
+    return new Response(JSON.stringify(pages[i++]), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+}
+
+test('usage follows the cursor and never parses it', async () => {
+  clean(); process.env.BLOCKRUN_API_KEY = VALID_KEY; auth.resetPayModeCache();
+  const { fetchUsage } = await import('../dist/payments/usage.js');
+  mockUsage([
+    { object: 'list', data: [usageRow({ id: 'a' })], next_cursor: 'OPAQUE//token==', unavailable_days: [] },
+    { object: 'list', data: [usageRow({ id: 'b' })], next_cursor: null, unavailable_days: [] },
+  ]);
+  const page = await fetchUsage({});
+  globalThis.fetch = realFetch;
+  assert.deepEqual(page.rows.map((r) => r.requestId), ['a', 'b'], 'both pages are read');
+  clean();
+});
+
+test('pending is not a settled zero, and free rows are counted not hidden', async () => {
+  const { summarize } = await import('../dist/payments/usage.js');
+  const { fetchUsage } = await import('../dist/payments/usage.js');
+  clean(); process.env.BLOCKRUN_API_KEY = VALID_KEY; auth.resetPayModeCache();
+  mockUsage([{ object: 'list', next_cursor: null, unavailable_days: [], data: [
+    usageRow({ id: 'p', cost: 0.02, state: 'priced' }),
+    usageRow({ id: 'q', cost: 0, state: 'pending' }),
+    usageRow({ id: 'f', cost: 0, state: 'free' }),
+    usageRow({ id: 'x', cost: 0.5, state: 'weird-new-value' }),
+  ] }]);
+  const page = await fetchUsage({});
+  globalThis.fetch = realFetch;
+
+  const t = summarize(page.rows);
+  assert.equal(t.pricedUsd, 0.02, 'only settled charges are summed');
+  assert.equal(t.pendingCount, 2, 'an unrecognised state is pending, never priced');
+  assert.equal(t.freeCount, 1, 'a free row is an answer and stays visible');
+  assert.equal(page.rows.length, 4, 'zero-cost rows are never filtered out');
+  clean();
+});
+
+test('unavailable_days is surfaced rather than read as a quiet period', async () => {
+  clean(); process.env.BLOCKRUN_API_KEY = VALID_KEY; auth.resetPayModeCache();
+  const { fetchUsage } = await import('../dist/payments/usage.js');
+  mockUsage([{ object: 'list', data: [], next_cursor: null, unavailable_days: ['2026-09-01', '2026-09-02'] }]);
+  const page = await fetchUsage({});
+  globalThis.fetch = realFetch;
+  assert.deepEqual(page.unavailableDays, ['2026-09-01', '2026-09-02']);
+  clean();
+});
+
+test('reconcile joins on request_id and names what it could not check', async () => {
+  const { reconcile } = await import('../dist/payments/usage.js');
+  const ledger = {
+    rows: [
+      usageRow({ id: 'match', cost: 0.0075 }),
+      usageRow({ id: 'drift', cost: 0.0100 }),
+      usageRow({ id: 'orphan', cost: 0.0500 }),
+      usageRow({ id: 'later', cost: 0.02, state: 'pending' }),
+    ].map((r) => ({
+      requestId: r.request_id, timestamp: r.timestamp, endpoint: r.endpoint, model: r.model,
+      kind: r.kind, inputTokens: 0, outputTokens: 0, costUsd: r.cost_usd, costState: r.cost_state, status: 200,
+    })),
+    unavailableDays: [],
+  };
+  const local = [
+    { requestId: 'match', costUsd: 0.0075 },
+    { requestId: 'drift', costUsd: 0.0075 },
+    { costUsd: 0.0075 }, // wallet-mode / pre-upgrade row: no id to join on
+  ];
+  const r = reconcile(ledger, local);
+
+  assert.equal(r.matched.length, 2);
+  assert.equal(r.matched.find((m) => m.row.requestId === 'match').deltaUsd, 0);
+  assert.ok(Math.abs(r.matched.find((m) => m.row.requestId === 'drift').deltaUsd + 0.0025) < 1e-9,
+    'a local underestimate shows as a negative delta');
+  assert.deepEqual(r.missingLocally.map((x) => x.requestId), ['orphan'],
+    'a charge with no local row is real spend that never reached --max-spend');
+  assert.equal(r.unjoinable, 1, 'rows with no id are reported, not silently counted as agreeing');
+  // A pending ledger row has no charge to disagree with yet.
+  assert.ok(!r.matched.some((m) => m.row.requestId === 'later'));
+});
+
+test('the request id is captured into the local journal', async () => {
+  const { requestIdFromResponse } = await import('../dist/payments/price-catalog.js');
+  const withId = new Response('{}', { headers: { 'x-blockrun-request-id': ' 326d2e86-abc ' } });
+  assert.equal(requestIdFromResponse(withId), '326d2e86-abc', 'trimmed');
+  assert.equal(requestIdFromResponse(new Response('{}')), null, 'absent header is null, not empty string');
+  assert.equal(requestIdFromResponse(new Response('{}', { headers: { 'x-blockrun-request-id': '  ' } })), null);
+  assert.equal(requestIdFromResponse(new Response('{}', { headers: { 'x-blockrun-request-id': 'x'.repeat(200) } })), null,
+    'an absurd value is refused rather than stored');
+});
+
 test('cleanup', () => {
   clean();
   rmSync(TEST_HOME, { recursive: true, force: true });
@@ -830,7 +938,7 @@ for (const status of [401, 402, 404, 429, 500]) {
       assert.equal(calls[0].headers.get('authorization'), `Bearer ${VALID_KEY}`);
       assert.equal(auth.resolvePayMode().kind, 'key');
     } finally {
-      globalThis.fetch = originalFetch;
+      globalThis.fetch = realFetch;
       clean();
     }
   });

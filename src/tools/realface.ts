@@ -38,7 +38,7 @@ import {
 } from '@blockrun/llm';
 import type { CapabilityHandler, CapabilityResult, ExecutionScope } from '../agent/types.js';
 import { loadChain, USER_AGENT} from '../config.js';
-import { chargeFromResponse, resolveCharge } from '../payments/price-catalog.js';
+import { chargeFromResponse, requestIdFromResponse, resolveCharge } from '../payments/price-catalog.js';
 import { gatewayBase, gatewayHeaders } from '../payments/auth-mode.js';
 import { recordUsage } from '../stats/tracker.js';
 import { logger } from '../logger.js';
@@ -226,7 +226,7 @@ async function actionEnroll(
   const charge = res.ok
     ? resolveCharge({ apiPath: url, chargedUsd: chargeFromResponse(res), settledUsd: paidUsd })
     : { usd: 0, estimated: false };
-  try { recordUsage('RealFace:enroll', 0, 0, charge.usd, Date.now() - start, false, charge.estimated); } catch { /* best-effort */ }
+  try { recordUsage('RealFace:enroll', 0, 0, charge.usd, Date.now() - start, false, charge.estimated, requestIdFromResponse(res)); } catch { /* best-effort */ }
 
   if (res.status === 425) {
     return { output: `RealFace enroll: the group isn't active yet — the person must finish the phone liveness check first. No payment taken. Poll action="status" until active, then retry.\n${raw.slice(0, 600)}`, isError: true };

@@ -408,6 +408,20 @@ export function chargeFromResponse(res: HeaderBag): number | null {
 }
 
 /**
+ * The gateway's id for this request, from `x-blockrun-request-id`.
+ *
+ * Recorded locally so `franklin usage` can join Franklin's journal to the
+ * account ledger row by row. Comparing totals is not the same check: two
+ * errors of opposite sign produce a total that matches and a ledger that is
+ * wrong in two places.
+ */
+export function requestIdFromResponse(res: HeaderBag): string | null {
+  const raw = res.headers?.get?.('x-blockrun-request-id');
+  const id = typeof raw === 'string' ? raw.trim() : '';
+  return id.length > 0 && id.length <= 128 ? id : null;
+}
+
+/**
  * Credit left on the account after this call, from
  * `x-blockrun-credit-remaining-usd`. Absent on ungated accounts, which have no
  * ceiling and so nothing to report — that is correct, not a failure.

@@ -29,7 +29,7 @@ import {
 } from '@blockrun/llm';
 import type { CapabilityHandler, CapabilityResult, ExecutionScope } from '../agent/types.js';
 import { loadChain, VERSION} from '../config.js';
-import { chargeFromResponse, resolveCharge } from '../payments/price-catalog.js';
+import { chargeFromResponse, requestIdFromResponse, resolveCharge } from '../payments/price-catalog.js';
 import { gatewayBase, gatewayHeaders } from '../payments/auth-mode.js';
 import { logger } from '../logger.js';
 import { recordUsage } from '../stats/tracker.js';
@@ -128,7 +128,7 @@ async function postRpcWithPayment(
     // the gateway settles silently and never sends a 402 — it stays 0. Price the
     // call from the published catalog instead of recording a free call.
     const charge = resolveCharge({ apiPath: endpoint, chargedUsd: chargeFromResponse(response), settledUsd: paidUsd });
-    try { recordUsage(`MultiChainRPC:${network}`, 0, 0, charge.usd, Date.now() - startedAt, false, charge.estimated); } catch { /* best-effort */ }
+    try { recordUsage(`MultiChainRPC:${network}`, 0, 0, charge.usd, Date.now() - startedAt, false, charge.estimated, requestIdFromResponse(response)); } catch { /* best-effort */ }
     return {
       body: await response.json(),
       network: response.headers.get('x-network') || network,
