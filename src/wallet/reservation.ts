@@ -48,6 +48,39 @@ const BALANCE_CACHE_MS = 5_000;
  */
 export const AMBIGUOUS_GRACE_MS = 30_000;
 
+/**
+ * A Solana zero is not a balance — it is the SDK's error value too.
+ *
+ * `SolanaLLMClient.getBalance()` catches every transport error and returns 0,
+ * and an RPC that answers 200 with a JSON-RPC error body reaches the same 0
+ * through `data.result?.value || []`. So a zero means "empty wallet" OR "the
+ * endpoint is not answering", and Franklin cannot tell which from the number.
+ *
+ * Refusing on it is the worse mistake of the two. A false zero blocks every
+ * paid tool for the length of an RPC blip — precisely the outcome
+ * `fetchBalance`'s fail-open exists to prevent — while trusting it costs
+ * nothing when the wallet really is empty, because those calls fail at payment
+ * anyway. The reservation layer's job is stopping concurrent calls from
+ * over-committing a KNOWN balance; there is nothing to over-commit at zero.
+ *
+ * This THROWS rather than returning Infinity on purpose. `fetchBalance` prunes
+ * ambiguous settlement entries only on a read that came back, so a throw both
+ * trips the fail-open and keeps those holds from being pruned against a number
+ * that reflects nothing (blockrun#140).
+ *
+ * Base is unaffected: its `getBalance()` propagates errors, so a zero there is
+ * a real zero.
+ */
+export async function readSolanaBalance(getBalance: () => Promise<number>): Promise<number> {
+  const balance = await getBalance();
+  if (balance === 0) {
+    throw new Error(
+      'Solana balance read returned 0, which the SDK also returns on RPC failure — treating the balance as unknown',
+    );
+  }
+  return balance;
+}
+
 async function readSpendableBalance(): Promise<number> {
   // Key mode has no wallet to read. Gating on one made every Modal call fail
   // with "Insufficient USDC — fund the wallet" for a user whose account
@@ -66,7 +99,7 @@ async function readSpendableBalance(): Promise<number> {
   }
   if (loadChain() === 'solana') {
     const client = await setupAgentSolanaWallet({ silent: true });
-    return client.getBalance();
+    return readSolanaBalance(() => client.getBalance());
   }
   const client = setupAgentWallet({ silent: true });
   return client.getBalance();
