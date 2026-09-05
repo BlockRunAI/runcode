@@ -42,7 +42,10 @@ test('markAmbiguous is idempotent and release-then-mark does not resurrect a hol
   assert.equal(walletReservation.snapshot().totalUsd, 0.06);
 });
 
-test('ambiguous holds self-heal only on a real balance read that started after the window', async () => {
+test('ambiguous holds self-heal only on a real balance read that started after the window', async (t) => {
+  // This test checks a 1 ms boundary; wall-clock scheduling must not move it.
+  const now = Date.now();
+  t.mock.method(Date, 'now', () => now);
   let fetches = 0;
   walletReservation._resetForTests(async () => { fetches++; return 0.10; });
   const a = await walletReservation.hold(0.06);

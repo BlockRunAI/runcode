@@ -66,15 +66,9 @@ export function useWalletMode(): void {
   cached = null;
 }
 
-/**
- * Demote to wallet mode after the gateway rejected the key (401). Called once
- * per process — a key that does not authenticate will not authenticate on the
- * next call either, and retrying it on every request would double the latency
- * of an entire session.
- */
+/** Refresh a rejected credential without changing the user's payment method. */
 export function invalidateKey(): void {
-  if (cached?.kind === 'key') cached = null;
-  forceWallet = true;
+  cached = null;
 }
 
 /** Test seam — drop the memoised mode so env/file changes are re-read. */
@@ -86,16 +80,17 @@ export function resetPayModeCache(): void {
 function readKeyFile(): string | null {
   try {
     const raw = fs.readFileSync(API_KEY_FILE, 'utf-8').trim();
-    return raw || null;
-  } catch {
-    return null; // no key on disk — wallet mode
+    return raw;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw new Error('Cannot read the saved API key. Fix its permissions or explicitly use --wallet.');
   }
 }
 
 /** The key Franklin would use, from env first then disk. Null when unset. */
 export function loadApiKey(): string | null {
   const fromEnv = process.env.BLOCKRUN_API_KEY?.trim();
-  if (fromEnv) return fromEnv;
+  if (fromEnv !== undefined) return fromEnv;
   return readKeyFile();
 }
 
@@ -120,7 +115,7 @@ export function clearApiKey(): boolean {
  * Resolve the active payment mode. Memoised per process — the resolution reads
  * the filesystem and is hit on every gateway call.
  *
- * Precedence: `--wallet` / a rejected key > BLOCKRUN_API_KEY > ~/.blockrun/api-key
+ * Precedence: `--wallet` > BLOCKRUN_API_KEY > ~/.blockrun/api-key
  * > wallet on the active chain.
  */
 export function resolvePayMode(): PayMode {
@@ -128,7 +123,10 @@ export function resolvePayMode(): PayMode {
 
   if (!forceWallet) {
     const key = loadApiKey();
-    if (key && isApiKeyShaped(key)) {
+    if (key !== null) {
+      if (!isApiKeyShaped(key)) {
+        throw new Error('Invalid API key in BLOCKRUN_API_KEY or the saved key file. Correct it, remove it, or explicitly use --wallet.');
+      }
       cached = { kind: 'key', apiBase: KEY_API_URL, key };
       return cached;
     }
@@ -152,7 +150,7 @@ export function gatewayBase(): string {
   return resolvePayMode().apiBase;
 }
 
-/** The x402 base to retry against when a key-mode call has to fall back. */
+/** The x402 base for an explicitly selected wallet chain. */
 export function walletBase(chain: Chain = loadChain()): string {
   return API_URLS[chain];
 }
@@ -258,16 +256,7 @@ export function applyGatewayAuth(
   return headers;
 }
 
-/**
- * Classify a key-mode failure so callers know whether falling back to the
- * wallet is safe.
- *
- * Only two statuses are worth retrying elsewhere. A 401 means the key itself
- * is bad, so the whole process demotes. A 404 `unsupported_endpoint` means
- * this one path is not served on the key host, so only that call falls back.
- * Everything else — 400, 402, 5xx — surfaces as-is, so a malformed request
- * never silently drains wallet USDC on a second attempt.
- */
+/** Classify account errors for display; neither error authorizes wallet billing. */
 export type KeyFailure = 'invalid-key' | 'unsupported-endpoint' | null;
 
 export function classifyKeyFailure(status: number, body: string): KeyFailure {
@@ -277,7 +266,7 @@ export function classifyKeyFailure(status: number, body: string): KeyFailure {
 }
 
 /**
- * Rewrite a key-host URL onto the wallet host for a fallback retry. The two
+ * Rewrite a key-host URL after the user explicitly selects wallet mode. The two
  * differ by the `/api` segment the wallet hosts carry, so this swaps the
  * origin and re-adds it rather than a plain string replace.
  */

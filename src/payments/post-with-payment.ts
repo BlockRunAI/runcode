@@ -24,11 +24,8 @@ import {
 } from '@blockrun/llm';
 import { loadChain, USER_AGENT, type Chain } from '../config.js';
 import {
-  classifyKeyFailure,
   gatewayHeaders,
-  invalidateKey,
   resolvePayMode,
-  toWalletUrl,
 } from './auth-mode.js';
 
 async function extractPaymentReq(response: Response): Promise<string | null> {
@@ -138,18 +135,11 @@ export async function postWithPayment(
         body: payload,
       });
       const keyRaw = await keyResponse.text().catch(() => '');
-      const failure = classifyKeyFailure(keyResponse.status, keyRaw);
-
-      // Only a bad key or a path the key host does not serve is worth retrying
-      // on the wallet. Anything else (400, 402, 5xx) is returned as-is so a
-      // malformed request never silently spends wallet USDC on a second try.
-      if (!failure) {
-        let parsedKey: Record<string, unknown> = {};
-        try { parsedKey = keyRaw ? JSON.parse(keyRaw) : {}; } catch { /* leave as {} */ }
-        return { ok: keyResponse.ok, status: keyResponse.status, body: parsedKey, raw: keyRaw, settled: false };
-      }
-      if (failure === 'invalid-key') invalidateKey();
-      endpoint = toWalletUrl(endpoint, chain);
+      // An account failure is never permission to spend from a wallet.
+      // The user can explicitly select --wallet and retry the command.
+      let parsedKey: Record<string, unknown> = {};
+      try { parsedKey = keyRaw ? JSON.parse(keyRaw) : {}; } catch { /* leave as {} */ }
+      return { ok: keyResponse.ok, status: keyResponse.status, body: parsedKey, raw: keyRaw, settled: false };
     }
 
     const headers: Record<string, string> = {

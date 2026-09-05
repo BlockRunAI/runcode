@@ -44,6 +44,31 @@ function writeKeyFile(key) {
   auth.resetPayModeCache();
 }
 
+test('Messages API credit refusal never invokes wallet signing', async () => {
+  clean();
+  process.env.BLOCKRUN_API_KEY = VALID_KEY;
+  const { ModelClient } = await import('../dist/agent/llm.js');
+  const client = new ModelClient({ apiUrl: KEY_API_URL, chain: 'solana' });
+  const nativeFetch = globalThis.fetch;
+  let signed = false;
+  let requests = 0;
+  client.signPayment = async () => { signed = true; return null; };
+  globalThis.fetch = async () => {
+    requests++;
+    return Response.json({ error: { message: 'Account credits exhausted' } }, { status: 402 });
+  };
+  try {
+    const events = [];
+    for await (const event of client.streamCompletion({ model: 'anthropic/claude-haiku-4.5', messages: [{ role: 'user', content: 'Hello' }], max_tokens: 8 })) events.push(event);
+    assert.equal(signed, false);
+    assert.equal(requests, 1);
+    assert.match(events.find(event => event.kind === 'error')?.payload.message ?? '', /credits exhausted/);
+  } finally {
+    globalThis.fetch = nativeFetch;
+    clean();
+  }
+});
+
 // ─── Backward compatibility: no key means nothing changes ───────────────
 //
 // This is the guarantee the whole feature rests on. If it ever fails, every
@@ -118,24 +143,24 @@ test('useWalletMode overrides a configured key', () => {
   clean();
 });
 
-test('invalidateKey demotes the process to wallet mode', () => {
+test('invalidateKey refreshes credentials without changing the payment method', () => {
   clean();
   process.env.BLOCKRUN_API_KEY = VALID_KEY;
   auth.resetPayModeCache();
   assert.equal(auth.isKeyMode(), true);
 
   auth.invalidateKey();
-  assert.equal(auth.isKeyMode(), false, 'a rejected key must not be retried all session');
+  assert.equal(auth.isKeyMode(), true, 'only an explicit wallet selection changes payment method');
   clean();
 });
 
-test('a malformed key is ignored rather than sent to the gateway', () => {
+test('a malformed configured key fails before any wallet fallback', () => {
   clean();
   // Truncated paste — sending this would produce a confusing 401 on the first
   // paid call instead of an obvious "that is not a key" at configure time.
   process.env.BLOCKRUN_API_KEY = 'brk_live_short';
   auth.resetPayModeCache();
-  assert.equal(auth.isKeyMode(), false);
+  assert.throws(() => auth.isKeyMode(), /BLOCKRUN_API_KEY/);
   clean();
 });
 
@@ -156,7 +181,7 @@ test('maskApiKey never reveals the secret tail beyond four characters', () => {
 
 // ─── Fallback classification ────────────────────────────────────────────
 
-test('only a bad key or an unserved path triggers a wallet fallback', () => {
+test('classifies account failures without choosing a payment method', () => {
   assert.equal(auth.classifyKeyFailure(401, '{"code":"invalid_api_key"}'), 'invalid-key');
   assert.equal(
     auth.classifyKeyFailure(404, '{"code":"unsupported_endpoint"}'),
@@ -714,4 +739,62 @@ test('no paid tool states a payment rail unconditionally', async () => {
 test('cleanup', () => {
   clean();
   rmSync(TEST_HOME, { recursive: true, force: true });
+});
+
+for (const status of [401, 402, 404, 429, 500]) {
+  test(`API ${status} preserves the selected account and never retries with a wallet`, async () => {
+    clean();
+    process.env.BLOCKRUN_API_KEY = VALID_KEY;
+    const calls = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      calls.push({ url, headers: new Headers(init.headers) });
+      return new Response(JSON.stringify({ code: status === 404 ? 'unsupported_endpoint' : 'rejected' }), { status });
+    };
+    try {
+      const { postWithPayment } = await import('../dist/payments/post-with-payment.js');
+      const result = await postWithPayment(`${KEY_API_URL}/v1/exa/search`, { query: 'test' }, 'test');
+      assert.equal(calls.length, 1, 'account errors must never trigger a wallet request');
+      assert.equal(result.status, status);
+      assert.equal(result.settled, false);
+      assert.equal(calls[0].headers.get('authorization'), `Bearer ${VALID_KEY}`);
+      assert.equal(auth.resolvePayMode().kind, 'key');
+    } finally {
+      globalThis.fetch = originalFetch;
+      clean();
+    }
+  });
+}
+
+for (const source of ['env', 'file']) {
+  for (const value of ['', '   ', 'not-a-key']) {
+    test(`invalid ${source} configuration cannot silently select a wallet (${JSON.stringify(value)})`, () => {
+      clean();
+      try {
+        if (source === 'env') process.env.BLOCKRUN_API_KEY = value;
+        else writeKeyFile(value);
+        assert.throws(() => auth.resolvePayMode(), /API.key|BLOCKRUN_API_KEY/i);
+        auth.useWalletMode();
+        assert.equal(auth.resolvePayMode().kind, 'wallet', 'explicit --wallet still works');
+      } finally { clean(); }
+    });
+  }
+}
+
+test('saving, rotating and removing a key refreshes request credentials across both wallet chains', () => {
+  clean();
+  try {
+    const secondKey = 'brk_test_' + 'b'.repeat(24);
+    auth.saveApiKey(VALID_KEY);
+    assert.equal(auth.gatewayHeaders().Authorization, `Bearer ${VALID_KEY}`);
+    auth.saveApiKey(secondKey);
+    assert.equal(auth.gatewayHeaders().Authorization, `Bearer ${secondKey}`);
+    assert.equal(auth.clearApiKey(), true);
+    for (const chain of ['solana', 'base']) {
+      saveChain(chain);
+      auth.resetPayModeCache();
+      assert.equal(auth.gatewayBase(), API_URLS[chain]);
+      assert.equal('Authorization' in auth.gatewayHeaders(), false);
+    }
+  } finally { clean(); }
 });

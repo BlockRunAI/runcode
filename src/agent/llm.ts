@@ -811,7 +811,9 @@ export class ModelClient {
       );
 
       // Handle x402 payment
-      if (response.status === 402) {
+      // Account 402 is a credit refusal. Only a request that started on
+      // the wallet rail may initiate a signing handshake.
+      if (response.status === 402 && !headers.Authorization) {
         if (this.debug) console.error('[franklin] Payment required — signing...');
         const signedPayment = await this.signPayment(response, request.model);
         if (!signedPayment) {

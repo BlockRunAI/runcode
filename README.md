@@ -121,7 +121,7 @@ VS Code → Extensions  (Cmd+Shift+X / Ctrl+Shift+X)
         → click the Franklin icon in the Activity Bar
 ```
 
-Free models work immediately. Paid models, image gen, and video gen activate the moment your wallet has USDC. The CLI and the extension share the same `~/.blockrun/` config and session history, so jumping between terminal and VS Code is seamless.
+Free models work immediately. Paid models, image gen, and video gen use your selected payment method: funded API account credit or a USDC wallet. The CLI and the extension share the same `~/.blockrun/` config and session history, so jumping between terminal and VS Code is seamless.
 
 ### Franklin Desktop (Beta)
 
@@ -205,8 +205,10 @@ franklin balance --wallet         # show the wallet balance, not the key status
 ```
 
 If the key is rejected, or a tool needs an endpoint the key gateway does not serve,
-Franklin falls back to the wallet for that call and tells you. It never falls back on a
-malformed request — a bad call is never retried with your USDC.
+Franklin returns that API error without charging a wallet. Correct the key or explicitly
+retry with `--wallet`. An empty or malformed configured key is an error; remove it to
+return to the wallet default. `franklin logout` removes the saved key; if
+`BLOCKRUN_API_KEY` is exported, unset it too.
 
 ### Spend tracking, and the one thing that stays an estimate
 
@@ -339,7 +341,7 @@ Every trade journals itself: thesis on open, P&L on close, written to a **wallet
   Saved: generated-logo-1713052800.png (1024x1024)
 ```
 
-Generates images via DALL-E / GPT Image directly from the CLI. Paid from your wallet — no OpenAI API key needed.
+Generates images via DALL-E / GPT Image directly from the CLI. Paid from your selected BlockRun API account or wallet — no OpenAI API key needed.
 
 ### 📱 Remote control via Telegram
 
