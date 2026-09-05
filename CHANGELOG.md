@@ -42,6 +42,25 @@ wallet" while account credits sat there. They read the credit balance now, and
 an ungated account or an unreachable gateway means no local ceiling rather than
 an invented one.
 
+**A Solana zero is the SDK's error value, not a balance.** `getBalance()`
+catches every transport error and returns 0, and an RPC that answers 200 with a
+JSON-RPC error body reaches the same 0. The reservation layer could not tell an
+empty wallet from a dead endpoint and chose the harsher reading, so an RPC blip
+refused every sandbox call against a wallet that was fine. It now treats a
+Solana zero as unknown and fails open — and does so by throwing, which also
+stops ambiguous settlement holds from being pruned against a number that
+reflects nothing (#140).
+
+**Franklin tells you when it stopped using your wallet.** Tightened wallet
+selection in 3.35.6 meant an install with both `~/.blockrun/.solana-session` and
+a legacy `solana-wallet.json` could quietly run on a different address than the
+one holding the USDC. The SDK prints a migration notice only when it CREATES a
+wallet, and that install creates nothing. `franklin doctor` now reports the
+divergence with both public addresses, and `franklin wallet-adopt <address>`
+switches deliberately — addresses are derived from the keys rather than trusted
+from a file, no secret is printed, and the current session is backed up before
+it is replaced (#119).
+
 **The system prompt no longer promises a wallet that isn't there.** Key-mode
 sessions were briefed on a chain, an address and a USDC balance, and pointed at
 a Wallet tool that returns a portal link. The instruction cache is keyed on the

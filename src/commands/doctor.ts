@@ -302,6 +302,25 @@ async function runChecks(): Promise<Check[]> {
     });
   }
 
+  // ── Solana wallet divergence (blockrun#119) ───────────────────────
+  // A tightened SDK selection can leave a user spending from a different
+  // address than the one holding their USDC, with nothing printed. Report it
+  // where they already look when money seems missing.
+  try {
+    const { detectSolanaWalletDivergence } = await import('../wallet/solana-migration.js');
+    const divergence = await detectSolanaWalletDivergence();
+    if (divergence) {
+      out.push({
+        name: 'Solana wallet',
+        status: 'warn',
+        detail:
+          `active ${divergence.active}; ${divergence.alternatives.length} other wallet(s) found: ` +
+          divergence.alternatives.map((w) => w.address).join(', '),
+        remedy: 'If your USDC is on one of those: franklin wallet-adopt <address>',
+      });
+    }
+  } catch { /* a diagnostic must never take down `franklin doctor` */ }
+
   return out;
 }
 

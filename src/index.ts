@@ -302,6 +302,14 @@ program
   });
 
 program
+  .command('wallet-adopt <address>')
+  .description('Make a discovered Solana wallet the active one (backs up the current session)')
+  .action(async (address: string) => {
+    const { walletAdoptCommand } = await import('./commands/wallet-adopt.js');
+    await walletAdoptCommand(address);
+  });
+
+program
   .command('telemetry [action]')
   .description('Manage opt-in local telemetry (status|enable|disable|view|summary)')
   .action(async (action?: string) => {
